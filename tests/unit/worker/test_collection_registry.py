@@ -45,8 +45,8 @@ class TestCollectionRegistry:
             char_path = registry.get_or_create_collection("scifact", _char_split(split_sequence=". "))
 
             assert fixed_path != char_path
-            assert fixed_path.name.endswith("__dimensions_0")
-            assert char_path.name.endswith("__dimensions_1")
+            assert fixed_path.name.endswith("__384_0")
+            assert char_path.name.endswith("__384_1")
 
     def test_same_strategy_different_chunk_params_creates_new_collection(self, tmp_path):
         with patch.dict("os.environ", {"LOCAL_COLLECTIONS_DIR": str(tmp_path)}):
