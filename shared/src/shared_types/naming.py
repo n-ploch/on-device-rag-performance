@@ -19,9 +19,7 @@ def model_storage_key(model_id: str, quantization: str) -> str:
 def collection_base_key(model_id: str, quantization: str, dimensions: int) -> str:
     """Base collection naming convention.
 
-    The dimensions value is used in the resolver tree, while the collection folder
-    name itself follows the requested `modelname__quantization__dimensions_<n>` shape.
+    Returns a key like `mistral-embed__q4_k_m__1024` which is used as the
+    prefix for numbered collection folders (e.g., `mistral-embed__q4_k_m__1024_0`).
     """
-
-    _ = dimensions
-    return f"{normalize_model_name(model_id)}__{quantization}__dimensions"
+    return f"{normalize_model_name(model_id)}__{quantization}__{dimensions}"
