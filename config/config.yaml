@@ -1,0 +1,41 @@
+# RAG Evaluation Configuration
+# See README.md for full documentation
+
+dataset:
+  source: "scifact"
+  path: "./data/scifact_gold_standard.json"
+
+observability:
+  langfuse: false  # Set to true for Langfuse cloud, false for local JSONL
+  output_jsonl: "./logs/traces.jsonl"
+
+paths:
+  log_dir: "./logs/"
+
+run_configs:
+  - run_id: "mistral_q4_baseline_001"
+    retrieval:
+      model: "intfloat/multilingual-e5-small"
+      quantization: "fp16"
+      dimensions: 384
+      chunking:
+        strategy: "fixed"
+        chunk_size: 500
+        chunk_overlap: 64
+      k: 3
+    generation:
+      model: "TheBloke/Mistral-7B-Instruct-v0.1-GGUF"
+      quantization: "q4_k_m"
+
+  - run_id: "mistral_q4_k5_001"
+    retrieval:
+      model: "intfloat/multilingual-e5-small"
+      quantization: "fp16"
+      dimensions: 384
+      chunking:
+        strategy: "char_split"
+        split_sequence: ". "
+      k: 5
+    generation:
+      model: "TheBloke/Mistral-7B-Instruct-v0.1-GGUF"
+      quantization: "q4_k_m"
