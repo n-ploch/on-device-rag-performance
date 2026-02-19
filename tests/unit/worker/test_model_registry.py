@@ -1,9 +1,9 @@
 """Tests defining model registry resolution."""
 
 import json
-import pytest
-from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 
 class TestModelRegistry:
@@ -31,7 +31,7 @@ class TestModelRegistry:
                 repo="TheBloke/Mistral-7B-Instruct-v0.1-GGUF",
                 quantization="q4_k_m",
             )
-            assert path == tmp_path / "mistral-7b-instruct-v0.1.Q4_K_M.gguf"
+            assert path == tmp_path / "Mistral-7B-Instruct-v0.1-GGUF__q4_k_m" / "mistral-7b-instruct-v0.1.Q4_K_M.gguf"
 
     def test_missing_model_raises(self, tmp_path):
         """Unknown model/quantization raises KeyError."""
@@ -85,5 +85,5 @@ class TestModelRegistry:
             path_a = get_model_path("model-a", "q4")
             path_b = get_model_path("model-b", "q4")
 
-            assert path_a == tmp_path / "a.gguf"
-            assert path_b == tmp_path / "b.gguf"
+            assert path_a == tmp_path / "model-a__q4" / "a.gguf"
+            assert path_b == tmp_path / "model-b__q4" / "b.gguf"

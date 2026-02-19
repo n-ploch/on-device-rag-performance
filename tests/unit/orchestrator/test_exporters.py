@@ -164,9 +164,10 @@ class TestJSONLExporter:
         with open(output) as f:
             data = json.loads(f.readline())
 
-        assert data["attributes"]["claim_id"] == "claim_001"
-        assert data["attributes"]["run_id"] == "mistral_q4_baseline_001"
-        assert data["attributes"]["retrieval.k"] == 3
+        attrs = {a["key"]: a["value"] for a in data["attributes"]}
+        assert attrs["claim_id"]["stringValue"] == "claim_001"
+        assert attrs["run_id"]["stringValue"] == "mistral_q4_baseline_001"
+        assert attrs["retrieval.k"]["intValue"] == 3
 
     def test_status_code_exported(self, tmp_path):
         """Status code (OK, ERROR) is exported."""
