@@ -318,7 +318,7 @@ class TestOTELAttributeFormat:
             name="rag.generate",
             attributes={
                 f"custom.hardware.{field}": getattr(measurement, field)
-                for field in measurement.model_fields.keys()
+                for field in HardwareMeasurement.model_fields.keys()
             },
         )
         exporter.export([span])
