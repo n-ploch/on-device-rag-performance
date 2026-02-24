@@ -16,6 +16,10 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 from shared_types.schemas import (
+    CollectionBuildRequest,
+    CollectionBuildResponse,
+    CollectionStatusRequest,
+    CollectionStatusResponse,
     GenerateRequest,
     GenerateResponse,
     InferenceMeasurement,
@@ -25,6 +29,8 @@ from worker.models.embedder import Embedder
 from worker.models.generator import Generator
 from worker.models.llm import detect_backend
 from worker.models.registry import get_model_path
+from worker.datasets.corpus_reader import CorpusReader
+from worker.services.embedding import EmbeddingService
 from worker.services.generation import GenerationService
 from worker.services.hardware_monitor import HardwareMonitor
 from worker.services.retrieval import RetrievalService
@@ -51,7 +57,12 @@ async def lifespan(app: FastAPI):
     app.state.generator = Generator(generator_path, n_ctx=2048)
 
     collections_dir = Path(os.environ.get("LOCAL_COLLECTIONS_DIR", "./collections"))
+    app.state.collections_dir = collections_dir
     app.state.retrieval_service = RetrievalService(
+        embedder=app.state.embedder,
+        collections_dir=collections_dir,
+    )
+    app.state.embedding_service = EmbeddingService(
         embedder=app.state.embedder,
         collections_dir=collections_dir,
     )
@@ -132,5 +143,88 @@ def create_app() -> FastAPI:
             "backend": detect_backend(),
             "models_loaded": models_loaded,
         }
+
+    @app.post("/collection/status", response_model=CollectionStatusResponse)
+    async def collection_status(
+        request: CollectionStatusRequest,
+        req: Request,
+    ) -> CollectionStatusResponse:
+        """Check if a collection exists and is populated."""
+        logger.info(
+            "POST /collection/status dataset=%s, model=%s",
+            request.dataset_id,
+            request.retrieval_config.model,
+        )
+        embedding_service: EmbeddingService = req.app.state.embedding_service
+
+        exists = embedding_service.collection_exists(
+            dataset_id=request.dataset_id,
+            retrieval_config=request.retrieval_config,
+        )
+
+        # Get chunk count if collection exists
+        chunk_count = None
+        collection_name = None
+        if exists:
+            collection_name = embedding_service._resolve_collection_name(
+                request.dataset_id,
+                request.retrieval_config,
+            )
+            import chromadb
+
+            client = chromadb.PersistentClient(
+                path=str(req.app.state.collections_dir)
+            )
+            try:
+                collection = client.get_collection(name=collection_name)
+                chunk_count = collection.count()
+            except ValueError:
+                pass
+
+        return CollectionStatusResponse(
+            exists=exists,
+            populated=exists and (chunk_count is not None and chunk_count > 0),
+            chunk_count=chunk_count,
+            collection_name=collection_name,
+        )
+
+    @app.post("/collection/build", response_model=CollectionBuildResponse)
+    async def collection_build(
+        request: CollectionBuildRequest,
+        req: Request,
+    ) -> CollectionBuildResponse:
+        """Build a collection by embedding the corpus."""
+        logger.info(
+            "POST /collection/build dataset=%s, model=%s",
+            request.dataset_id,
+            request.retrieval_config.model,
+        )
+        embedding_service: EmbeddingService = req.app.state.embedding_service
+
+        # Load corpus from dataset
+        corpus_reader = CorpusReader.from_dataset_id(request.dataset_id)
+        corpus = corpus_reader.read_all()
+
+        logger.info("Loaded %d documents from corpus", len(corpus))
+
+        # Build the collection
+        result = embedding_service.embed_corpus(
+            corpus=corpus,
+            dataset_id=request.dataset_id,
+            retrieval_config=request.retrieval_config,
+        )
+
+        logger.info(
+            "Collection built: %s, chunks=%d, already_existed=%s",
+            result.collection_name,
+            result.total_chunks,
+            result.already_existed,
+        )
+
+        return CollectionBuildResponse(
+            collection_name=result.collection_name,
+            chunks_embedded=result.total_chunks,
+            already_existed=result.already_existed,
+        )
 
     return app
