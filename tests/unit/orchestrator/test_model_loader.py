@@ -292,25 +292,39 @@ class TestDownloadGgufModel:
 class TestDownloadRetrievalModel:
     """Tests for download_retrieval_model function."""
 
-    def test_downloads_snapshot_and_updates_registry(self, tmp_path):
-        """Should download full repo and update registry."""
+    def test_downloads_gguf_and_updates_registry(self, tmp_path):
+        """Should download GGUF file and update registry."""
         spec = ModelSpec(
             repo="test/embed", quantization="fp16", model_type="retrieval"
         )
 
-        with patch("orchestrator.models.loader.snapshot_download") as mock_download:
+        mock_files = ["embed-model.FP16.gguf", "embed-model.Q8_0.gguf"]
+        download_path = tmp_path / "embed__fp16" / "embed-model.FP16.gguf"
+
+        with (
+            patch(
+                "orchestrator.models.loader.list_repo_files",
+                return_value=mock_files,
+            ),
+            patch(
+                "orchestrator.models.loader.hf_hub_download",
+                return_value=str(download_path),
+            ) as mock_download,
+        ):
             status = download_retrieval_model(spec, tmp_path)
 
         assert status.downloaded is True
-        assert status.filename == "config.json"
+        assert status.filename == "embed-model.FP16.gguf"
         assert status.repo == "test/embed"
 
         mock_download.assert_called_once()
 
         # Check registry was updated
         registry = json.loads((tmp_path / "model_registry.json").read_text())
-        assert registry["models"]["test/embed"]["fp16"]["filename"] == "config.json"
-        assert registry["models"]["test/embed"]["fp16"]["type"] == "retrieval"
+        assert (
+            registry["models"]["test/embed"]["fp16"]["filename"]
+            == "embed-model.FP16.gguf"
+        )
 
 
 class TestEnsureModels:
@@ -322,7 +336,7 @@ class TestEnsureModels:
         registry = {
             "models": {
                 "intfloat/multilingual-e5-small": {
-                    "fp16": {"filename": "config.json", "type": "retrieval"}
+                    "fp16": {"filename": "multilingual-e5-small-fp16.gguf"}
                 },
                 "TheBloke/Mistral-7B-Instruct-v0.1-GGUF": {
                     "q4_k_m": {"filename": "model.Q4_K_M.gguf"},
@@ -334,7 +348,7 @@ class TestEnsureModels:
 
         # Create model files
         for dirname, filename in [
-            ("multilingual-e5-small__fp16", "config.json"),
+            ("multilingual-e5-small__fp16", "multilingual-e5-small-fp16.gguf"),
             ("Mistral-7B-Instruct-v0.1-GGUF__q4_k_m", "model.Q4_K_M.gguf"),
             ("Mistral-7B-Instruct-v0.1-GGUF__q8_0", "model.Q8_0.gguf"),
         ]:
@@ -351,7 +365,11 @@ class TestEnsureModels:
         # Empty registry - no models available
         (tmp_path / "model_registry.json").write_text('{"models": {}}')
 
-        mock_gguf_files = ["model.Q4_K_M.gguf", "model.Q8_0.gguf"]
+        mock_gguf_files = [
+            "multilingual-e5-small-fp16.gguf",
+            "model.Q4_K_M.gguf",
+            "model.Q8_0.gguf",
+        ]
 
         with (
             patch(
@@ -359,7 +377,6 @@ class TestEnsureModels:
                 return_value=mock_gguf_files,
             ),
             patch("orchestrator.models.loader.hf_hub_download") as mock_hf_download,
-            patch("orchestrator.models.loader.snapshot_download"),
         ):
             mock_hf_download.return_value = str(tmp_path / "dummy.gguf")
             statuses = ensure_models(sample_config, tmp_path)
@@ -371,7 +388,11 @@ class TestEnsureModels:
         """Should use LOCAL_MODELS_DIR env var if models_dir not provided."""
         (tmp_path / "model_registry.json").write_text('{"models": {}}')
 
-        mock_gguf_files = ["model.Q4_K_M.gguf", "model.Q8_0.gguf"]
+        mock_gguf_files = [
+            "multilingual-e5-small-fp16.gguf",
+            "model.Q4_K_M.gguf",
+            "model.Q8_0.gguf",
+        ]
 
         with (
             patch.dict("os.environ", {"LOCAL_MODELS_DIR": str(tmp_path)}),
@@ -380,7 +401,6 @@ class TestEnsureModels:
                 return_value=mock_gguf_files,
             ),
             patch("orchestrator.models.loader.hf_hub_download") as mock_hf_download,
-            patch("orchestrator.models.loader.snapshot_download"),
         ):
             mock_hf_download.return_value = str(tmp_path / "dummy.gguf")
             statuses = ensure_models(sample_config)

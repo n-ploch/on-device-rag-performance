@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from huggingface_hub import hf_hub_download, list_repo_files, snapshot_download
+from huggingface_hub import hf_hub_download, list_repo_files
 
 from orchestrator.config import EvalConfig
 from shared_types.naming import model_storage_key
@@ -257,9 +257,10 @@ def download_gguf_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
 
 
 def download_retrieval_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
-    """Download a retrieval model (sentence transformer) from HuggingFace Hub.
+    """Download a retrieval model GGUF file from HuggingFace Hub.
 
-    Downloads the full model repository using snapshot_download.
+    Retrieval runs through llama.cpp in the worker, so retrieval models must be
+    distributed as GGUF artifacts matching the requested quantization.
 
     Args:
         spec: Model specification with repo and quantization.
@@ -271,46 +272,17 @@ def download_retrieval_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
     Raises:
         DownloadError: If download fails.
     """
-    logger.info("Downloading retrieval model: %s (%s)", spec.repo, spec.quantization)
-
-    # Create storage directory
-    storage_dir = models_dir / model_storage_key(spec.repo, spec.quantization)
-    storage_dir.mkdir(parents=True, exist_ok=True)
-
-    # Download full repository
-    try:
-        snapshot_download(
-            repo_id=spec.repo,
-            local_dir=storage_dir,
-            local_dir_use_symlinks=False,
-        )
-    except Exception as e:
-        raise DownloadError(
-            f"Failed to download retrieval model '{spec.repo}': {e}"
-        ) from e
-
-    # Use config.json as sentinel file for registry
-    sentinel_file = "config.json"
-
-    # Update registry
-    registry = _load_registry(models_dir)
-    if spec.repo not in registry["models"]:
-        registry["models"][spec.repo] = {}
-    registry["models"][spec.repo][spec.quantization] = {
-        "filename": sentinel_file,
-        "type": "retrieval",
-    }
-    _save_registry(models_dir, registry)
-
-    logger.info("Downloaded retrieval model to: %s", storage_dir)
-
-    return ModelStatus(
-        repo=spec.repo,
-        quantization=spec.quantization,
-        path=storage_dir / sentinel_file,
-        downloaded=True,
-        filename=sentinel_file,
+    logger.info(
+        "Downloading retrieval GGUF model: %s (%s)", spec.repo, spec.quantization
     )
+
+    try:
+        return download_gguf_model(spec, models_dir)
+    except ModelNotFoundError as e:
+        raise DownloadError(
+            f"Failed to download retrieval model '{spec.repo}' as GGUF: {e}. "
+            "Retrieval models must be llama.cpp-compatible GGUF files."
+        ) from e
 
 
 def download_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
