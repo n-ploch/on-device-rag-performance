@@ -18,7 +18,7 @@ from pathlib import Path
 import httpx
 
 from orchestrator.config import EvalConfig
-from shared_types.dataset_loader import get_dataset_dir
+from shared_types.dataset_loader import DatasetLoader, get_dataset_dir
 from shared_types.schemas import RunConfig
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,51 @@ class Orchestrator:
             ground_truth_path,
         )
         return validation
+
+    def load_dataset(self, loader: DatasetLoader) -> dict[str, Path]:
+        """Load a dataset using the provided loader.
+
+        Exports corpus, ground truth, and metadata to the local dataset folder
+        using the limits specified in the configuration.
+
+        Args:
+            loader: A DatasetLoader instance to use for loading the dataset.
+
+        Returns:
+            Dictionary mapping artifact names to their file paths:
+            - "corpus": Path to corpus.parquet
+            - "ground_truth": Path to ground_truth.parquet
+            - "metadata": Path to metadata.json
+        """
+        dataset_id = self.config.dataset.id
+        output_dir = self.datasets_dir / dataset_id
+
+        corpus_limit = self.config.dataset.limits.corpus
+        ground_truth_limit = self.config.dataset.limits.ground_truth
+
+        logger.info(
+            "Loading dataset '%s' to %s (corpus_limit=%s, ground_truth_limit=%s)",
+            dataset_id,
+            output_dir,
+            corpus_limit,
+            ground_truth_limit,
+        )
+
+        paths = loader.export_all(
+            output_dir=output_dir,
+            corpus_limit=corpus_limit,
+            ground_truth_limit=ground_truth_limit,
+        )
+
+        logger.info(
+            "Dataset '%s' loaded successfully: corpus=%s, ground_truth=%s, metadata=%s",
+            dataset_id,
+            paths["corpus"],
+            paths["ground_truth"],
+            paths["metadata"],
+        )
+
+        return paths
 
     async def check_worker_health(self) -> WorkerHealth:
         """Check that the worker is healthy and ready.
