@@ -1,6 +1,6 @@
 """Shared Pydantic schemas for the RAG evaluation system."""
 
-from shared_types.dataset_loader import DatasetLoader
+from shared_types.dataset_loader import DatasetLoader, get_dataset_dir
 from shared_types.naming import collection_base_key, model_storage_key, normalize_model_name
 from shared_types.schemas import (
     ChunkingConfig,
@@ -17,6 +17,7 @@ from shared_types.schemas import (
 
 __all__ = [
     "collection_base_key",
+    "get_dataset_dir",
     "model_storage_key",
     "normalize_model_name",
     "ChunkingConfig",

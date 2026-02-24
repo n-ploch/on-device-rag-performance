@@ -4,12 +4,34 @@ This module defines the interface for dataset loaders that transform
 raw datasets into the standardized formats used by the RAG evaluation system:
 - Corpus: Generic documents for embedding (worker)
 - Ground Truth: Evaluation data with evidence (orchestrator)
+
+Storage is organized as: $LOCAL_DATASETS_DIR/{dataset_id}/
 """
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
+
+DEFAULT_DATASETS_DIR = "./local/datasets"
+
+
+def get_dataset_dir(dataset_id: str, datasets_dir: Path | None = None) -> Path:
+    """Get the storage directory for a dataset.
+
+    Args:
+        dataset_id: Dataset identifier (e.g., 'scifact').
+        datasets_dir: Base datasets directory. If None, uses LOCAL_DATASETS_DIR
+            environment variable or falls back to ./local/datasets.
+
+    Returns:
+        Path to the dataset directory: {datasets_dir}/{dataset_id}/
+    """
+    if datasets_dir is None:
+        datasets_dir = Path(os.environ.get("LOCAL_DATASETS_DIR", DEFAULT_DATASETS_DIR))
+
+    return datasets_dir / dataset_id
 
 
 class DatasetLoader(ABC):
@@ -103,9 +125,23 @@ class DatasetLoader(ABC):
         """
         ...
 
+    def get_default_output_dir(self, datasets_dir: Path | None = None) -> Path:
+        """Get the default output directory for this dataset.
+
+        Uses LOCAL_DATASETS_DIR environment variable or falls back to ./local/datasets.
+        The dataset files are stored under: {datasets_dir}/{dataset_id}/
+
+        Args:
+            datasets_dir: Base datasets directory. If None, uses env var.
+
+        Returns:
+            Path to this dataset's directory.
+        """
+        return get_dataset_dir(self.dataset_id, datasets_dir)
+
     def export_all(
         self,
-        output_dir: Path,
+        output_dir: Path | None = None,
         corpus_limit: int | None = None,
         ground_truth_limit: int | None = None,
     ) -> dict[str, Path]:
@@ -114,14 +150,19 @@ class DatasetLoader(ABC):
         Convenience method that exports corpus, ground truth, and metadata.
 
         Args:
-            output_dir: Directory to write all files.
+            output_dir: Directory to write all files. If None, uses the default
+                location: $LOCAL_DATASETS_DIR/{dataset_id}/
             corpus_limit: Maximum number of corpus documents.
             ground_truth_limit: Maximum number of ground truth samples.
 
         Returns:
             Dictionary mapping artifact names to their file paths.
         """
-        output_dir = Path(output_dir)
+        if output_dir is None:
+            output_dir = self.get_default_output_dir()
+        else:
+            output_dir = Path(output_dir)
+
         output_dir.mkdir(parents=True, exist_ok=True)
 
         return {
