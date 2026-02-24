@@ -4,6 +4,10 @@ from shared_types.dataset_loader import DatasetLoader, get_dataset_dir
 from shared_types.naming import collection_base_key, model_storage_key, normalize_model_name
 from shared_types.schemas import (
     ChunkingConfig,
+    CollectionBuildRequest,
+    CollectionBuildResponse,
+    CollectionStatusRequest,
+    CollectionStatusResponse,
     CorpusDocument,
     GenerateRequest,
     GenerateResponse,
@@ -21,6 +25,10 @@ __all__ = [
     "model_storage_key",
     "normalize_model_name",
     "ChunkingConfig",
+    "CollectionBuildRequest",
+    "CollectionBuildResponse",
+    "CollectionStatusRequest",
+    "CollectionStatusResponse",
     "CorpusDocument",
     "DatasetLoader",
     "GenerateRequest",

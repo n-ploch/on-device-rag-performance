@@ -118,3 +118,37 @@ class CorpusDocument(BaseModel):
     id: str
     text: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# Collection management schemas (orchestrator <-> worker)
+
+
+class CollectionStatusRequest(BaseModel):
+    """Request to check collection status."""
+
+    dataset_id: str
+    retrieval_config: RetrievalConfig
+
+
+class CollectionStatusResponse(BaseModel):
+    """Response with collection status."""
+
+    exists: bool
+    populated: bool
+    chunk_count: int | None = None
+    collection_name: str | None = None
+
+
+class CollectionBuildRequest(BaseModel):
+    """Request to build a collection."""
+
+    dataset_id: str
+    retrieval_config: RetrievalConfig
+
+
+class CollectionBuildResponse(BaseModel):
+    """Response after building a collection."""
+
+    collection_name: str
+    chunks_embedded: int
+    already_existed: bool
