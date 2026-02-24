@@ -2,7 +2,7 @@
 # See README.md for full documentation
 
 dataset:
-  source: "scifact"
+  source: "allenai/scifact"
   path: "./data/scifact_gold_standard.json"
 
 observability:
