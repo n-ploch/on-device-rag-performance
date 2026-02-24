@@ -1,17 +1,18 @@
 """HuggingFace SciFact dataset loader.
 
-Loads the allenai/scifact dataset and transforms it to the standard
+Loads the BeIR/scifact dataset and transforms it to the standard
 corpus and ground truth formats for the RAG evaluation system.
 
 SciFact is a scientific claim verification dataset where:
-- Corpus: Scientific paper abstracts (as sentences)
-- Claims: Atomic claims that may be supported/contradicted by abstracts
-- Evidence: Sentence-level annotations linking claims to abstract sentences
+- Corpus: Scientific paper abstracts
+- Queries: Scientific claims to verify
+- Qrels: Relevance judgments mapping claims to supporting documents
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
@@ -25,20 +26,21 @@ from shared_types import CorpusDocument, DatasetLoader
 if TYPE_CHECKING:
     from datasets import Dataset
 
+logger = logging.getLogger(__name__)
+
 
 class HuggingFaceSciFact(DatasetLoader):
-    """Dataset loader for SciFact from HuggingFace Hub.
+    """Dataset loader for SciFact from HuggingFace Hub (BeIR format).
 
-    SciFact structure:
-    - Corpus split: {doc_id, title, abstract (list of sentences), structured}
-    - Claims split: {id, claim, evidence (dict), cited_doc_ids}
-
-    Evidence structure: {doc_id: [{label, sentences: [indices]}]}
+    Uses the BeIR/scifact dataset which contains:
+    - corpus.jsonl.gz: {_id, title, text, metadata}
+    - queries.jsonl.gz: {_id, text, metadata}
+    - qrels (from BeIR/scifact-qrels): query-id, corpus-id, score
     """
 
-    REPO_ID = "allenai/scifact"
-    CORPUS_SPLIT = "corpus"
-    CLAIMS_SPLIT = "claims"
+    CORPUS_URL = "hf://datasets/BeIR/scifact/corpus.jsonl.gz"
+    QUERIES_URL = "hf://datasets/BeIR/scifact/queries.jsonl.gz"
+    QRELS_URL = "hf://datasets/BeIR/scifact-qrels/test.tsv"
 
     def __init__(self, cache_dir: Path | None = None):
         """Initialize the SciFact loader.
@@ -48,7 +50,8 @@ class HuggingFaceSciFact(DatasetLoader):
         """
         self._cache_dir = cache_dir
         self._corpus_dataset: Dataset | None = None
-        self._claims_dataset: Dataset | None = None
+        self._queries_dataset: Dataset | None = None
+        self._qrels_dataset: Dataset | None = None
         self._corpus_count: int = 0
         self._ground_truth_count: int = 0
 
@@ -58,150 +61,107 @@ class HuggingFaceSciFact(DatasetLoader):
         return "scifact"
 
     def _load_corpus(self) -> Dataset:
-        """Lazy-load the corpus split."""
+        """Lazy-load the corpus."""
         if self._corpus_dataset is None:
             from datasets import load_dataset
 
+            logger.info("Loading SciFact corpus from BeIR/scifact")
             self._corpus_dataset = load_dataset(
-                self.REPO_ID,
-                split=self.CORPUS_SPLIT,
+                "json",
+                data_files=self.CORPUS_URL,
+                split="train",
                 cache_dir=str(self._cache_dir) if self._cache_dir else None,
-                trust_remote_code=True,
             )
         return self._corpus_dataset
 
-    def _load_claims(self) -> Dataset:
-        """Lazy-load the claims split."""
-        if self._claims_dataset is None:
+    def _load_queries(self) -> Dataset:
+        """Lazy-load the queries."""
+        if self._queries_dataset is None:
             from datasets import load_dataset
 
-            self._claims_dataset = load_dataset(
-                self.REPO_ID,
-                split=self.CLAIMS_SPLIT,
+            logger.info("Loading SciFact queries from BeIR/scifact")
+            self._queries_dataset = load_dataset(
+                "json",
+                data_files=self.QUERIES_URL,
+                split="train",
                 cache_dir=str(self._cache_dir) if self._cache_dir else None,
-                trust_remote_code=True,
             )
-        return self._claims_dataset
+        return self._queries_dataset
 
-    def _build_corpus_index(self) -> dict[str, dict[str, Any]]:
-        """Build an index of corpus documents for evidence extraction.
+    def _load_qrels(self) -> Dataset:
+        """Lazy-load the relevance judgments."""
+        if self._qrels_dataset is None:
+            from datasets import load_dataset
+
+            logger.info("Loading SciFact qrels from BeIR/scifact-qrels")
+            self._qrels_dataset = load_dataset(
+                "csv",
+                data_files=self.QRELS_URL,
+                delimiter="\t",
+                split="train",
+                cache_dir=str(self._cache_dir) if self._cache_dir else None,
+            )
+        return self._qrels_dataset
+
+    def _build_qrels_index(self) -> dict[str, list[str]]:
+        """Build index mapping query_id to list of relevant corpus_ids.
 
         Returns:
-            Dict mapping doc_id to {title, abstract_sentences}.
+            Dict mapping query_id (str) to list of corpus_ids (str).
         """
-        corpus = self._load_corpus()
-        index = {}
-        for row in corpus:
-            doc_id = str(row["doc_id"])
-            index[doc_id] = {
-                "title": row.get("title"),
-                "abstract": row.get("abstract", []),
-            }
+        qrels = self._load_qrels()
+        index: dict[str, list[str]] = {}
+        for row in qrels:
+            query_id = str(row["query-id"])
+            corpus_id = str(row["corpus-id"])
+            if query_id not in index:
+                index[query_id] = []
+            index[query_id].append(corpus_id)
         return index
 
     def _transform_corpus_document(self, row: dict[str, Any]) -> CorpusDocument:
-        """Transform a SciFact corpus row to generic CorpusDocument.
-
-        SciFact stores abstracts as a list of sentences. We join them
-        into a single text for embedding.
-        """
-        abstract_sentences = row.get("abstract", [])
-        text = " ".join(abstract_sentences) if abstract_sentences else ""
-
+        """Transform a BeIR corpus row to generic CorpusDocument."""
         return CorpusDocument(
-            id=str(row["doc_id"]),
-            text=text,
+            id=str(row["_id"]),
+            text=row.get("text", ""),
             metadata={
                 "title": row.get("title"),
-                "structured": row.get("structured", False),
-                "sentence_count": len(abstract_sentences),
             },
         )
 
     def _transform_ground_truth(
         self,
         row: dict[str, Any],
-        corpus_index: dict[str, dict[str, Any]],
+        qrels_index: dict[str, list[str]],
     ) -> GroundTruthEntry:
-        """Transform a SciFact claim to GroundTruthEntry.
+        """Transform a SciFact query to GroundTruthEntry."""
+        query_id = str(row["_id"])
+        supporting_docs = qrels_index.get(query_id, [])
 
-        Extracts sentence-level evidence and resolves sentence texts
-        from the corpus index.
-        """
-        evidence_raw = row.get("evidence", {}) or {}
-        cited_doc_ids = row.get("cited_doc_ids", []) or []
-
-        # Determine overall label
-        labels = set()
-        for doc_evidence_list in evidence_raw.values():
-            for ev in doc_evidence_list:
-                labels.add(ev.get("label", ""))
-
-        if "SUPPORT" in labels and "CONTRADICT" not in labels:
-            expected_label = "SUPPORT"
-        elif "CONTRADICT" in labels and "SUPPORT" not in labels:
-            expected_label = "CONTRADICT"
-        elif labels:
-            expected_label = "MIXED"
-        else:
-            expected_label = "NOT_ENOUGH_INFO"
-
-        # Build document evidence
+        # BeIR format doesn't have sentence-level evidence, just doc-level
         evidence_list: list[DocumentEvidence] = []
-        supporting_documents: list[str] = []
-
-        for doc_id_str, doc_evidence_raw in evidence_raw.items():
-            doc_id = str(doc_id_str)
-            supporting_documents.append(doc_id)
-
-            # Get document info from corpus index
-            doc_info = corpus_index.get(doc_id, {})
-            abstract_sentences = doc_info.get("abstract", [])
-
-            # Group evidence by label
-            sentences_by_label: dict[str, list[tuple[list[int], list[str]]]] = {}
-            for ev in doc_evidence_raw:
-                label = ev.get("label", "UNKNOWN")
-                sent_indices = ev.get("sentences", [])
-
-                # Extract actual sentence texts
-                sent_texts = []
-                for idx in sent_indices:
-                    if 0 <= idx < len(abstract_sentences):
-                        sent_texts.append(abstract_sentences[idx])
-
-                if label not in sentences_by_label:
-                    sentences_by_label[label] = []
-                sentences_by_label[label].append((sent_indices, sent_texts))
-
-            # Create SentenceEvidence for each label group
-            sentence_evidence_list: list[SentenceEvidence] = []
-            for label, evidence_groups in sentences_by_label.items():
-                for indices, texts in evidence_groups:
-                    sentence_evidence_list.append(
-                        SentenceEvidence(
-                            sentence_indices=indices,
-                            sentence_texts=texts,
-                            label=label,
-                        )
-                    )
-
+        for doc_id in supporting_docs:
             evidence_list.append(
                 DocumentEvidence(
                     doc_id=doc_id,
-                    doc_title=doc_info.get("title"),
-                    sentences=sentence_evidence_list,
+                    doc_title=None,
+                    sentences=[],
                 )
             )
 
+        # Determine label based on whether there are supporting docs
+        if supporting_docs:
+            expected_label = "SUPPORT"
+        else:
+            expected_label = "NOT_ENOUGH_INFO"
+
         return GroundTruthEntry(
-            id=str(row["id"]),
-            input=row["claim"],
+            id=query_id,
+            input=row["text"],
             expected_label=expected_label,
-            supporting_documents=supporting_documents,
+            supporting_documents=supporting_docs,
             evidence=evidence_list,
-            # SciFact-specific fields unpacked directly
-            cited_doc_ids=[str(d) for d in cited_doc_ids],
+            cited_doc_ids=supporting_docs,
         )
 
     def _iter_corpus(self, limit: int | None = None) -> Iterator[CorpusDocument]:
@@ -214,15 +174,15 @@ class HuggingFaceSciFact(DatasetLoader):
 
     def _iter_ground_truth(
         self,
-        corpus_index: dict[str, dict[str, Any]],
+        qrels_index: dict[str, list[str]],
         limit: int | None = None,
     ) -> Iterator[GroundTruthEntry]:
         """Iterate over ground truth entries."""
-        claims = self._load_claims()
-        for i, row in enumerate(claims):
+        queries = self._load_queries()
+        for i, row in enumerate(queries):
             if limit is not None and i >= limit:
                 break
-            yield self._transform_ground_truth(row, corpus_index)
+            yield self._transform_ground_truth(row, qrels_index)
 
     def export_corpus(self, output_dir: Path, limit: int | None = None) -> Path:
         """Export corpus to Parquet format."""
@@ -243,11 +203,11 @@ class HuggingFaceSciFact(DatasetLoader):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build corpus index for evidence text extraction
-        corpus_index = self._build_corpus_index()
+        # Build qrels index for relevance judgments
+        qrels_index = self._build_qrels_index()
 
         records = [
-            entry.model_dump() for entry in self._iter_ground_truth(corpus_index, limit=limit)
+            entry.model_dump() for entry in self._iter_ground_truth(qrels_index, limit=limit)
         ]
         self._ground_truth_count = len(records)
 
@@ -264,9 +224,10 @@ class HuggingFaceSciFact(DatasetLoader):
 
         metadata = {
             "dataset_id": self.dataset_id,
-            "source": self.REPO_ID,
-            "corpus_split": self.CORPUS_SPLIT,
-            "claims_split": self.CLAIMS_SPLIT,
+            "source": "BeIR/scifact",
+            "corpus_url": self.CORPUS_URL,
+            "queries_url": self.QUERIES_URL,
+            "qrels_url": self.QRELS_URL,
             "corpus_count": self._corpus_count,
             "ground_truth_count": self._ground_truth_count,
             "created_at": datetime.now(timezone.utc).isoformat(),

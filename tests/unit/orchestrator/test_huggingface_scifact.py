@@ -1,7 +1,8 @@
-"""Tests for HuggingFaceSciFact dataset loader."""
+"""Tests for HuggingFaceSciFact dataset loader (BeIR format)."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,41 +13,45 @@ from orchestrator.datasets.huggingface_scifact import HuggingFaceSciFact
 
 @pytest.fixture
 def mock_corpus_data():
-    """Mock SciFact corpus data."""
+    """Mock BeIR corpus data."""
     return [
         {
-            "doc_id": 1,
+            "_id": "1",
             "title": "Aspirin Study",
-            "abstract": ["Aspirin reduces inflammation.", "It is widely used."],
-            "structured": False,
+            "text": "Aspirin reduces inflammation. It is widely used.",
+            "metadata": {},
         },
         {
-            "doc_id": 2,
+            "_id": "2",
             "title": "Ibuprofen Research",
-            "abstract": ["Ibuprofen is an NSAID.", "It treats pain."],
-            "structured": True,
+            "text": "Ibuprofen is an NSAID. It treats pain.",
+            "metadata": {},
         },
     ]
 
 
 @pytest.fixture
-def mock_claims_data():
-    """Mock SciFact claims data."""
+def mock_queries_data():
+    """Mock BeIR queries data."""
     return [
         {
-            "id": 1,
-            "claim": "Aspirin reduces inflammation.",
-            "evidence": {
-                "1": [{"label": "SUPPORT", "sentences": [0]}],
-            },
-            "cited_doc_ids": [1],
+            "_id": "100",
+            "text": "Aspirin reduces inflammation.",
+            "metadata": {},
         },
         {
-            "id": 2,
-            "claim": "Ibuprofen causes drowsiness.",
-            "evidence": {},
-            "cited_doc_ids": [2],
+            "_id": "101",
+            "text": "Ibuprofen causes drowsiness.",
+            "metadata": {},
         },
+    ]
+
+
+@pytest.fixture
+def mock_qrels_data():
+    """Mock BeIR qrels data."""
+    return [
+        {"query-id": 100, "corpus-id": 1, "score": 1},
     ]
 
 
@@ -85,8 +90,8 @@ class TestHuggingFaceSciFact:
             assert "Aspirin reduces inflammation" in records[0]["text"]
             assert records[0]["metadata"]["title"] == "Aspirin Study"
 
-    def test_export_corpus_joins_abstract_sentences(self, tmp_path, mock_corpus_data):
-        """Abstract sentences are joined into single text."""
+    def test_export_corpus_preserves_text(self, tmp_path, mock_corpus_data):
+        """Text content is preserved from BeIR format."""
         import pyarrow.parquet as pq
 
         with patch("datasets.load_dataset") as mock_load:
@@ -98,7 +103,6 @@ class TestHuggingFaceSciFact:
             table = pq.read_table(tmp_path / "corpus.parquet")
             records = table.to_pylist()
 
-            # Abstract sentences should be joined with space
             assert records[0]["text"] == "Aspirin reduces inflammation. It is widely used."
 
     def test_export_corpus_respects_limit(self, tmp_path, mock_corpus_data):
@@ -115,15 +119,19 @@ class TestHuggingFaceSciFact:
             assert table.num_rows == 1
 
     def test_export_ground_truth_creates_parquet(
-        self, tmp_path, mock_corpus_data, mock_claims_data
+        self, tmp_path, mock_corpus_data, mock_queries_data, mock_qrels_data
     ):
         """export_ground_truth creates a ground_truth.parquet file."""
         with patch("datasets.load_dataset") as mock_load:
 
-            def load_side_effect(repo, split, **kwargs):
-                if split == "corpus":
+            def load_side_effect(fmt, data_files=None, delimiter=None, **kwargs):
+                if data_files and "corpus" in data_files:
                     return mock_corpus_data
-                return mock_claims_data
+                elif data_files and "queries" in data_files:
+                    return mock_queries_data
+                elif delimiter == "\t":
+                    return mock_qrels_data
+                return mock_corpus_data
 
             mock_load.side_effect = load_side_effect
 
@@ -133,18 +141,22 @@ class TestHuggingFaceSciFact:
             assert result_path == tmp_path / "ground_truth.parquet"
             assert result_path.exists()
 
-    def test_export_ground_truth_includes_evidence(
-        self, tmp_path, mock_corpus_data, mock_claims_data
+    def test_export_ground_truth_maps_qrels(
+        self, tmp_path, mock_corpus_data, mock_queries_data, mock_qrels_data
     ):
-        """Ground truth includes sentence-level evidence."""
+        """Ground truth uses qrels for supporting documents."""
         import pyarrow.parquet as pq
 
         with patch("datasets.load_dataset") as mock_load:
 
-            def load_side_effect(repo, split, **kwargs):
-                if split == "corpus":
+            def load_side_effect(fmt, data_files=None, delimiter=None, **kwargs):
+                if data_files and "corpus" in data_files:
                     return mock_corpus_data
-                return mock_claims_data
+                elif data_files and "queries" in data_files:
+                    return mock_queries_data
+                elif delimiter == "\t":
+                    return mock_qrels_data
+                return mock_corpus_data
 
             mock_load.side_effect = load_side_effect
 
@@ -154,34 +166,29 @@ class TestHuggingFaceSciFact:
             table = pq.read_table(tmp_path / "ground_truth.parquet")
             records = table.to_pylist()
 
-            # First claim has evidence
-            claim1 = records[0]
-            assert claim1["id"] == "1"
-            assert claim1["input"] == "Aspirin reduces inflammation."
-            assert claim1["expected_label"] == "SUPPORT"
-            assert "1" in claim1["supporting_documents"]
-            assert len(claim1["evidence"]) == 1
+            # First query has a qrel
+            query1 = records[0]
+            assert query1["id"] == "100"
+            assert query1["input"] == "Aspirin reduces inflammation."
+            assert query1["expected_label"] == "SUPPORT"
+            assert "1" in query1["supporting_documents"]
 
-            # Evidence includes sentence texts
-            doc_evidence = claim1["evidence"][0]
-            assert doc_evidence["doc_id"] == "1"
-            assert len(doc_evidence["sentences"]) == 1
-            assert doc_evidence["sentences"][0]["sentence_texts"] == [
-                "Aspirin reduces inflammation."
-            ]
-
-    def test_export_ground_truth_handles_no_evidence(
-        self, tmp_path, mock_corpus_data, mock_claims_data
+    def test_export_ground_truth_handles_no_qrels(
+        self, tmp_path, mock_corpus_data, mock_queries_data, mock_qrels_data
     ):
-        """Claims without evidence get NOT_ENOUGH_INFO label."""
+        """Queries without qrels get NOT_ENOUGH_INFO label."""
         import pyarrow.parquet as pq
 
         with patch("datasets.load_dataset") as mock_load:
 
-            def load_side_effect(repo, split, **kwargs):
-                if split == "corpus":
+            def load_side_effect(fmt, data_files=None, delimiter=None, **kwargs):
+                if data_files and "corpus" in data_files:
                     return mock_corpus_data
-                return mock_claims_data
+                elif data_files and "queries" in data_files:
+                    return mock_queries_data
+                elif delimiter == "\t":
+                    return mock_qrels_data
+                return mock_corpus_data
 
             mock_load.side_effect = load_side_effect
 
@@ -191,23 +198,27 @@ class TestHuggingFaceSciFact:
             table = pq.read_table(tmp_path / "ground_truth.parquet")
             records = table.to_pylist()
 
-            # Second claim has no evidence
-            claim2 = records[1]
-            assert claim2["expected_label"] == "NOT_ENOUGH_INFO"
-            assert claim2["supporting_documents"] == []
+            # Second query has no qrels
+            query2 = records[1]
+            assert query2["expected_label"] == "NOT_ENOUGH_INFO"
+            assert query2["supporting_documents"] == []
 
-    def test_export_ground_truth_unpacks_cited_doc_ids(
-        self, tmp_path, mock_corpus_data, mock_claims_data
+    def test_export_ground_truth_includes_cited_doc_ids(
+        self, tmp_path, mock_corpus_data, mock_queries_data, mock_qrels_data
     ):
-        """cited_doc_ids is unpacked as a direct field."""
+        """cited_doc_ids is included as a direct field."""
         import pyarrow.parquet as pq
 
         with patch("datasets.load_dataset") as mock_load:
 
-            def load_side_effect(repo, split, **kwargs):
-                if split == "corpus":
+            def load_side_effect(fmt, data_files=None, delimiter=None, **kwargs):
+                if data_files and "corpus" in data_files:
                     return mock_corpus_data
-                return mock_claims_data
+                elif data_files and "queries" in data_files:
+                    return mock_queries_data
+                elif delimiter == "\t":
+                    return mock_qrels_data
+                return mock_corpus_data
 
             mock_load.side_effect = load_side_effect
 
@@ -217,20 +228,23 @@ class TestHuggingFaceSciFact:
             table = pq.read_table(tmp_path / "ground_truth.parquet")
             records = table.to_pylist()
 
-            # cited_doc_ids should be present as direct field
             assert "cited_doc_ids" in records[0]
             assert records[0]["cited_doc_ids"] == ["1"]
 
-    def test_export_metadata_creates_json(self, tmp_path, mock_corpus_data, mock_claims_data):
+    def test_export_metadata_creates_json(
+        self, tmp_path, mock_corpus_data, mock_queries_data, mock_qrels_data
+    ):
         """export_metadata creates a metadata.json file."""
-        import json
-
         with patch("datasets.load_dataset") as mock_load:
 
-            def load_side_effect(repo, split, **kwargs):
-                if split == "corpus":
+            def load_side_effect(fmt, data_files=None, delimiter=None, **kwargs):
+                if data_files and "corpus" in data_files:
                     return mock_corpus_data
-                return mock_claims_data
+                elif data_files and "queries" in data_files:
+                    return mock_queries_data
+                elif delimiter == "\t":
+                    return mock_qrels_data
+                return mock_corpus_data
 
             mock_load.side_effect = load_side_effect
 
@@ -244,18 +258,24 @@ class TestHuggingFaceSciFact:
 
             metadata = json.loads(result_path.read_text())
             assert metadata["dataset_id"] == "scifact"
-            assert metadata["source"] == "allenai/scifact"
+            assert metadata["source"] == "BeIR/scifact"
             assert metadata["corpus_count"] == 2
             assert metadata["ground_truth_count"] == 2
 
-    def test_export_all_creates_all_files(self, tmp_path, mock_corpus_data, mock_claims_data):
+    def test_export_all_creates_all_files(
+        self, tmp_path, mock_corpus_data, mock_queries_data, mock_qrels_data
+    ):
         """export_all creates corpus, ground_truth, and metadata."""
         with patch("datasets.load_dataset") as mock_load:
 
-            def load_side_effect(repo, split, **kwargs):
-                if split == "corpus":
+            def load_side_effect(fmt, data_files=None, delimiter=None, **kwargs):
+                if data_files and "corpus" in data_files:
                     return mock_corpus_data
-                return mock_claims_data
+                elif data_files and "queries" in data_files:
+                    return mock_queries_data
+                elif delimiter == "\t":
+                    return mock_qrels_data
+                return mock_corpus_data
 
             mock_load.side_effect = load_side_effect
 
