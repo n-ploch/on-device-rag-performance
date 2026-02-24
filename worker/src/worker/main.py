@@ -36,6 +36,11 @@ from worker.services.hardware_monitor import HardwareMonitor
 from worker.services.retrieval import RetrievalService
 
 
+def _is_missing_collection_error(exc: Exception) -> bool:
+    """Return True if exception indicates a missing Chroma collection."""
+    return isinstance(exc, ValueError) or exc.__class__.__name__ == "NotFoundError"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load models at startup, release on shutdown.
@@ -178,8 +183,11 @@ def create_app() -> FastAPI:
             try:
                 collection = client.get_collection(name=collection_name)
                 chunk_count = collection.count()
-            except ValueError:
-                pass
+            except Exception as e:
+                if _is_missing_collection_error(e):
+                    pass
+                else:
+                    raise
 
         return CollectionStatusResponse(
             exists=exists,

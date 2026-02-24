@@ -150,6 +150,23 @@ class TestEmbeddingService:
 
             assert result is False
 
+    def test_collection_exists_returns_false_for_chromadb_not_found(
+        self, tmp_path, mock_embedder, retrieval_config
+    ):
+        """collection_exists returns False for Chroma NotFoundError."""
+        with patch("worker.services.embedding.chromadb") as mock_chromadb:
+            class NotFoundError(Exception):
+                pass
+
+            mock_client = MagicMock()
+            mock_client.get_collection.side_effect = NotFoundError("Collection missing")
+            mock_chromadb.PersistentClient.return_value = mock_client
+
+            service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
+            result = service.collection_exists("scifact", retrieval_config)
+
+            assert result is False
+
     def test_progress_callback_invoked(
         self, tmp_path, mock_embedder, sample_corpus, retrieval_config_no_chunking
     ):

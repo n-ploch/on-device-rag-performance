@@ -24,6 +24,11 @@ if TYPE_CHECKING:
     from worker.models.embedder import Embedder
 
 
+def _is_missing_collection_error(exc: Exception) -> bool:
+    """Return True if exception indicates a missing Chroma collection."""
+    return isinstance(exc, ValueError) or exc.__class__.__name__ == "NotFoundError"
+
+
 @dataclass
 class EmbeddingProgress:
     """Progress information for embedding callback."""
@@ -120,8 +125,11 @@ class EmbeddingService:
                     total_chunks=existing.count(),
                     already_existed=True,
                 )
-        except ValueError:
-            pass  # Collection doesn't exist yet
+        except Exception as e:
+            if _is_missing_collection_error(e):
+                pass  # Collection doesn't exist yet
+            else:
+                raise
 
         # Ensure collection path exists via registry
         self._registry.get_or_create_collection(dataset_id, retrieval_config)
@@ -178,8 +186,10 @@ class EmbeddingService:
         try:
             collection = client.get_collection(name=collection_name)
             return collection.count() > 0
-        except ValueError:
-            return False
+        except Exception as e:
+            if _is_missing_collection_error(e):
+                return False
+            raise
 
     def _resolve_collection_name(
         self,
