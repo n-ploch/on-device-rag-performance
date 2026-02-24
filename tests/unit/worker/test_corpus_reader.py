@@ -127,3 +127,23 @@ class TestCorpusReader:
         assert len(documents) == 1
         assert documents[0].id == "custom1"
         assert documents[0].metadata["source"] == "custom"
+
+    def test_from_dataset_id_resolves_path(self, tmp_path):
+        """from_dataset_id resolves corpus path from dataset ID and base dir."""
+        # Create dataset directory structure
+        dataset_dir = tmp_path / "scifact"
+        dataset_dir.mkdir()
+
+        records = [{"id": "doc1", "text": "Test", "metadata": {"title": "Test Doc"}}]
+        table = pa.Table.from_pylist(records)
+        pq.write_table(table, dataset_dir / "corpus.parquet")
+
+        reader = CorpusReader.from_dataset_id("scifact", datasets_dir=tmp_path)
+
+        assert reader.count() == 1
+        assert reader.path == dataset_dir / "corpus.parquet"
+
+    def test_from_dataset_id_raises_if_not_found(self, tmp_path):
+        """from_dataset_id raises FileNotFoundError if corpus doesn't exist."""
+        with pytest.raises(FileNotFoundError):
+            CorpusReader.from_dataset_id("nonexistent", datasets_dir=tmp_path)
