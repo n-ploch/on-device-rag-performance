@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from statistics import mean
 
 import psutil
+
+logger = logging.getLogger(__name__)
 
 from shared_types.schemas import HardwareMeasurement
 
@@ -52,12 +55,18 @@ class HardwareMonitor:
             swap_in_bytes=swap_in,
             swap_out_bytes=swap_out,
         )
+        logger.debug(
+            "Hardware sampling complete: %d RAM samples, %d CPU samples",
+            len(self._ram_samples_mb),
+            len(self._cpu_samples_pct),
+        )
 
     async def _sample_loop(self) -> None:
         while self._active:
             try:
                 self._capture_sample()
-            except Exception:
+            except Exception as e:
+                logger.warning("Hardware sampling error: %s", e)
                 break
             await asyncio.sleep(self.sample_interval)
 

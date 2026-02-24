@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 from llama_cpp import Llama
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -25,6 +28,7 @@ class Generator:
     """
 
     def __init__(self, model_path: Path, n_ctx: int = 2048, n_gpu_layers: int = -1):
+        logger.info("Loading generator from %s (n_ctx=%d)", model_path, n_ctx)
         self._model = Llama(
             model_path=str(model_path),
             n_ctx=n_ctx,
@@ -41,6 +45,7 @@ class Generator:
         stop: list[str] | None = None,
     ) -> GenerationResult:
         """Generate text completion for the given prompt."""
+        logger.debug("Generating with max_tokens=%d, temp=%.2f", max_tokens, temperature)
         result = self._model(
             prompt,
             max_tokens=max_tokens,

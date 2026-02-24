@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+
+from worker.logging_config import setup_logging
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 from shared_types.schemas import (
     GenerateRequest,
@@ -36,10 +42,12 @@ async def lifespan(app: FastAPI):
     generator_repo = os.environ.get("GENERATOR_MODEL_REPO", "mistral-7b-instruct")
     generator_quant = os.environ.get("GENERATOR_QUANTIZATION", "q4_k_m")
 
+    logger.info("Loading embedder: %s (%s)", embedder_repo, embedder_quant)
     embedder_path = get_model_path(embedder_repo, embedder_quant)
-    generator_path = get_model_path(generator_repo, generator_quant)
-
     app.state.embedder = Embedder(embedder_path, n_ctx=512)
+
+    logger.info("Loading generator: %s (%s)", generator_repo, generator_quant)
+    generator_path = get_model_path(generator_repo, generator_quant)
     app.state.generator = Generator(generator_path, n_ctx=2048)
 
     collections_dir = Path(os.environ.get("LOCAL_COLLECTIONS_DIR", "./collections"))
@@ -49,6 +57,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.generation_service = GenerationService(generator=app.state.generator)
 
+    logger.info("Models loaded, worker ready")
     yield
 
     del app.state.generator
@@ -60,6 +69,12 @@ def create_app() -> FastAPI:
 
     @app.post("/generate", response_model=GenerateResponse)
     async def generate(request: GenerateRequest, req: Request) -> GenerateResponse:
+        logger.info("POST /generate run_id=%s", request.run_config.run_id)
+        logger.debug(
+            "Retrieval config: k=%d, model=%s",
+            request.run_config.retrieval.k,
+            request.run_config.retrieval.model,
+        )
         retrieval_service: RetrievalService = req.app.state.retrieval_service
         generation_service: GenerationService = req.app.state.generation_service
 
@@ -96,6 +111,12 @@ def create_app() -> FastAPI:
             tokens_per_second=gen_result.completion_tokens / duration_seconds,
         )
 
+        logger.info(
+            "Request complete: retrieval=%.1fms, generation=%.1fms, total=%.1fms",
+            retrieval_latency_ms,
+            llm_generation_latency_ms,
+            e2e_latency_ms,
+        )
         return GenerateResponse(
             output=gen_result.text,
             retrieval_data=retrieval_data,

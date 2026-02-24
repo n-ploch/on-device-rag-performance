@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import chromadb
+
+logger = logging.getLogger(__name__)
 
 from shared_types.naming import collection_base_key
 from shared_types.schemas import RetrievalConfig
@@ -40,6 +43,7 @@ class RetrievalService:
         collection_name = self._resolve_collection_name(retrieval_config)
 
         if collection_name not in self._collection_cache:
+            logger.debug("Loading collection: %s", collection_name)
             self._collection_cache[collection_name] = self._client.get_collection(
                 name=collection_name,
                 embedding_function=self._embedding_fn,
@@ -71,6 +75,7 @@ class RetrievalService:
             List of dicts with 'id' and 'text' keys for each retrieved chunk.
         """
         collection = self._get_collection(retrieval_config)
+        logger.debug("ChromaDB query: k=%d, query_len=%d", retrieval_config.k, len(query))
 
         results = collection.query(
             query_texts=[query],
@@ -92,4 +97,5 @@ class RetrievalService:
                 "metadata": metadata,
             })
 
+        logger.info("Retrieved %d chunks", len(retrieved))
         return retrieved

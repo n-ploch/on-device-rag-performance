@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from worker.models.generator import Generator, GenerationResult
+
+logger = logging.getLogger(__name__)
 
 
 class GenerationService:
@@ -30,14 +33,22 @@ class GenerationService:
         Returns:
             GenerationResult with text and token counts.
         """
-        rag_prompt = self._build_rag_prompt(prompt, retrieval_chunks or [])
+        chunks = retrieval_chunks or []
+        logger.debug("Building RAG prompt with %d chunks", len(chunks))
+        rag_prompt = self._build_rag_prompt(prompt, chunks)
 
-        return self._generator.generate(
+        result = self._generator.generate(
             prompt=rag_prompt,
             max_tokens=max_tokens,
             temperature=0.7,
             stop=["</s>", "\n\n---"],
         )
+        logger.info(
+            "Generated %d tokens (prompt: %d tokens)",
+            result.completion_tokens,
+            result.prompt_tokens,
+        )
+        return result
 
     def _build_rag_prompt(self, query: str, chunks: list[dict]) -> str:
         """Build a RAG prompt with retrieved context."""

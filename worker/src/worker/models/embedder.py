@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from llama_cpp import Llama
+
+logger = logging.getLogger(__name__)
 
 
 class Embedder:
@@ -16,6 +19,7 @@ class Embedder:
     """
 
     def __init__(self, model_path: Path, n_ctx: int = 512, n_gpu_layers: int = -1):
+        logger.info("Loading embedder from %s (n_ctx=%d)", model_path, n_ctx)
         self._model = Llama(
             model_path=str(model_path),
             embedding=True,
@@ -26,6 +30,7 @@ class Embedder:
 
     def embed(self, text: str) -> list[float]:
         """Generate embedding vector for a single text string."""
+        logger.debug("Embedding text of length %d", len(text))
         result = self._model.embed(text)
         if isinstance(result, list) and len(result) > 0:
             if isinstance(result[0], list):
