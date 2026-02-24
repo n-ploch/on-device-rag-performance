@@ -1,0 +1,390 @@
+"""Orchestrator runner for RAG evaluation benchmarks.
+
+This module provides the main entry point for running RAG evaluations:
+- Loads configuration from YAML
+- Ensures datasets, models, and collections are available
+- Iterates over ground truth entries calling the worker's /generate endpoint
+- Computes retrieval metrics and exports results to JSONL
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import httpx
+import pyarrow.parquet as pq
+from pydantic import BaseModel
+
+from orchestrator.config import EvalConfig
+from orchestrator.datasets import HuggingFaceSciFact
+from orchestrator.datasets.schemas import GroundTruthEntry
+from orchestrator.metrics import detect_abstention, mrr, precision_at_k, recall_at_k
+from orchestrator.orchestrator import DatasetNotFoundError, Orchestrator
+from shared_types.schemas import GenerateRequest, GenerateResponse, RunConfig
+
+logger = logging.getLogger(__name__)
+
+
+class EvaluationResult(BaseModel):
+    """Combined result for a single evaluation sample."""
+
+    run_id: str
+    claim_id: str
+    ground_truth: GroundTruthEntry
+    response: GenerateResponse
+    recall_at_k: float | None = None
+    precision_at_k: float | None = None
+    mrr: float | None = None
+    is_abstention: bool = False
+
+
+class ResultsExporter:
+    """Export evaluation results to JSONL format."""
+
+    def __init__(self, output_path: Path):
+        """Initialize the exporter.
+
+        Args:
+            output_path: Path to the JSONL output file.
+        """
+        self.output_path = output_path
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._file = self.output_path.open("a", encoding="utf-8")
+
+    def export(self, result: EvaluationResult) -> None:
+        """Write a single result to the JSONL file.
+
+        Args:
+            result: The evaluation result to export.
+        """
+        payload = result.model_dump()
+        payload["exported_at"] = datetime.now(timezone.utc).isoformat()
+        self._file.write(json.dumps(payload) + "\n")
+        self._file.flush()
+
+    def close(self) -> None:
+        """Close the output file."""
+        if not self._file.closed:
+            self._file.flush()
+            self._file.close()
+
+
+def load_ground_truth(ground_truth_path: Path) -> list[GroundTruthEntry]:
+    """Load ground truth entries from parquet file.
+
+    Args:
+        ground_truth_path: Path to the ground_truth.parquet file.
+
+    Returns:
+        List of GroundTruthEntry objects.
+    """
+    table = pq.read_table(ground_truth_path)
+    return [GroundTruthEntry.model_validate(row) for row in table.to_pylist()]
+
+
+def ensure_dataset(orchestrator: Orchestrator) -> None:
+    """Ensure dataset is available, loading if necessary.
+
+    Args:
+        orchestrator: The orchestrator instance.
+    """
+    try:
+        orchestrator.validate_dataset()
+        logger.info("Dataset already available")
+    except DatasetNotFoundError:
+        logger.info("Dataset not found, loading from HuggingFace...")
+        loader = HuggingFaceSciFact()
+        orchestrator.load_dataset(loader)
+        logger.info("Dataset loaded successfully")
+
+
+async def evaluate_single(
+    client: httpx.AsyncClient,
+    entry: GroundTruthEntry,
+    run_config: RunConfig,
+) -> EvaluationResult:
+    """Evaluate a single ground truth entry.
+
+    Args:
+        client: HTTP client for worker communication.
+        entry: Ground truth entry to evaluate.
+        run_config: Run configuration for this evaluation.
+
+    Returns:
+        EvaluationResult with response and computed metrics.
+    """
+    request = GenerateRequest(
+        claim_id=entry.id,
+        input_prompt=entry.input,
+        run_config=run_config,
+    )
+
+    response = await client.post(
+        "/generate",
+        json=request.model_dump(),
+        timeout=httpx.Timeout(300.0),
+    )
+    response.raise_for_status()
+
+    gen_response = GenerateResponse.model_validate(response.json())
+
+    # Compute retrieval metrics
+    relevant_docs = set(entry.supporting_documents)
+    retrieved_docs = gen_response.retrieval_data.cited_doc_ids
+    k = run_config.retrieval.k
+
+    result_recall = None
+    result_precision = None
+    result_mrr = None
+
+    if relevant_docs:
+        result_recall = recall_at_k(retrieved_docs, relevant_docs, k)
+        result_precision = precision_at_k(retrieved_docs, relevant_docs, k)
+        result_mrr = mrr(retrieved_docs, relevant_docs)
+
+    return EvaluationResult(
+        run_id=run_config.run_id,
+        claim_id=entry.id,
+        ground_truth=entry,
+        response=gen_response,
+        recall_at_k=result_recall,
+        precision_at_k=result_precision,
+        mrr=result_mrr,
+        is_abstention=detect_abstention(gen_response.output),
+    )
+
+
+async def run_evaluation(
+    orchestrator: Orchestrator,
+    run_config: RunConfig,
+    entries: list[GroundTruthEntry],
+    exporter: ResultsExporter,
+    show_progress: bool = True,
+) -> list[EvaluationResult]:
+    """Run evaluation for a single run config across all entries.
+
+    Args:
+        orchestrator: The orchestrator instance with HTTP client.
+        run_config: Run configuration to evaluate.
+        entries: List of ground truth entries.
+        exporter: Results exporter for JSONL output.
+        show_progress: Whether to show progress output.
+
+    Returns:
+        List of evaluation results.
+    """
+    if not orchestrator._client:
+        raise RuntimeError("Orchestrator must be used as async context manager")
+
+    results: list[EvaluationResult] = []
+    total = len(entries)
+
+    for i, entry in enumerate(entries, start=1):
+        if show_progress:
+            print(f"\r[{run_config.run_id}] {i}/{total}", end="", flush=True)
+
+        try:
+            result = await evaluate_single(
+                orchestrator._client,
+                entry,
+                run_config,
+            )
+            results.append(result)
+            exporter.export(result)
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "HTTP error for claim %s: %s %s",
+                entry.id,
+                e.response.status_code,
+                e.response.text[:200],
+            )
+            raise
+        except httpx.RequestError as e:
+            logger.error("Request error for claim %s: %s", entry.id, e)
+            raise
+
+    if show_progress:
+        print()
+
+    return results
+
+
+async def _run(
+    config_path: Path,
+    dry_run: bool = False,
+    quiet: bool = False,
+    run_id_filter: str | None = None,
+) -> int:
+    """Main async entry point.
+
+    Args:
+        config_path: Path to evaluation config YAML.
+        dry_run: If True, validate config and exit without evaluation.
+        quiet: If True, suppress progress output.
+        run_id_filter: If set, only run the specified run_id.
+
+    Returns:
+        Exit code (0 for success, non-zero for failure).
+    """
+    # Load configuration
+    config = EvalConfig.from_yaml(config_path)
+    logger.info("Loaded config with %d run_configs", len(config.run_configs))
+
+    # Filter run configs if specified
+    run_configs = config.run_configs
+    if run_id_filter:
+        run_configs = [rc for rc in run_configs if rc.run_id == run_id_filter]
+        if not run_configs:
+            logger.error("No run config found with run_id=%s", run_id_filter)
+            return 1
+
+    # Determine output path
+    log_dir = Path(config.paths.log_dir)
+    results_path = log_dir / "results.jsonl"
+
+    async with Orchestrator(config) as orchestrator:
+        # Ensure dataset is available
+        ensure_dataset(orchestrator)
+
+        if dry_run:
+            # Just validate prerequisites
+            validation = orchestrator.validate_dataset()
+            entries = load_ground_truth(validation.ground_truth_path)
+            logger.info(
+                "Dry run complete. Would evaluate %d entries x %d configs",
+                len(entries),
+                len(run_configs),
+            )
+            return 0
+
+        # Validate all prerequisites (models, worker, collections)
+        await orchestrator.validate_prerequisites()
+
+        # Load ground truth
+        validation = orchestrator.validate_dataset()
+        entries = load_ground_truth(validation.ground_truth_path)
+        logger.info("Loaded %d ground truth entries", len(entries))
+
+        # Run evaluations
+        exporter = ResultsExporter(results_path)
+        try:
+            for run_config in run_configs:
+                logger.info("Starting evaluation: %s", run_config.run_id)
+
+                results = await run_evaluation(
+                    orchestrator,
+                    run_config,
+                    entries,
+                    exporter,
+                    show_progress=not quiet,
+                )
+
+                # Compute and print summary
+                results_with_recall = [r for r in results if r.recall_at_k is not None]
+                if results_with_recall:
+                    avg_recall = sum(r.recall_at_k for r in results_with_recall) / len(
+                        results_with_recall
+                    )
+                    avg_precision = sum(
+                        r.precision_at_k for r in results_with_recall
+                    ) / len(results_with_recall)
+                    avg_mrr = sum(r.mrr for r in results_with_recall) / len(
+                        results_with_recall
+                    )
+                else:
+                    avg_recall = avg_precision = avg_mrr = 0.0
+
+                abstention_count = sum(1 for r in results if r.is_abstention)
+
+                logger.info(
+                    "Completed %s: recall@k=%.3f, precision@k=%.3f, mrr=%.3f, "
+                    "abstentions=%d/%d",
+                    run_config.run_id,
+                    avg_recall,
+                    avg_precision,
+                    avg_mrr,
+                    abstention_count,
+                    len(results),
+                )
+        finally:
+            exporter.close()
+
+    logger.info("Results written to %s", results_path)
+    return 0
+
+
+def main() -> int:
+    """CLI entry point for the orchestrator runner.
+
+    Returns:
+        Exit code.
+    """
+    parser = argparse.ArgumentParser(
+        description="Run RAG evaluation benchmark",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--config",
+        "-c",
+        type=Path,
+        default=Path("config/config.yaml"),
+        help="Path to evaluation config YAML",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate configuration and exit without running evaluation",
+    )
+    parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress progress output",
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable verbose logging",
+    )
+    parser.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Run only the specified run_id from config",
+    )
+
+    args = parser.parse_args()
+
+    # Configure logging
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # Validate config path
+    if not args.config.exists():
+        logging.error("Config file not found: %s", args.config)
+        return 1
+
+    # Run async main
+    return asyncio.run(
+        _run(
+            config_path=args.config,
+            dry_run=args.dry_run,
+            quiet=args.quiet,
+            run_id_filter=args.run_id,
+        )
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
