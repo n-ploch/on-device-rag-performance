@@ -19,8 +19,8 @@ paths:
 run_configs:
   - run_id: "mistral_q4_baseline_001"
     retrieval:
-      model: "intfloat/multilingual-e5-small"
-      quantization: "fp16"
+      model: "keisuke-miyako/multilingual-e5-small-gguf-q4_k_m"
+      quantization: "q4_k_m"
       dimensions: 384
       chunking:
         strategy: "fixed"
@@ -28,18 +28,5 @@ run_configs:
         chunk_overlap: 64
       k: 3
     generation:
-      model: "TheBloke/Mistral-7B-Instruct-v0.1-GGUF"
-      quantization: "q4_k_m"
-
-  - run_id: "mistral_q4_k5_001"
-    retrieval:
-      model: "intfloat/multilingual-e5-small"
-      quantization: "fp16"
-      dimensions: 384
-      chunking:
-        strategy: "char_split"
-        split_sequence: ". "
-      k: 5
-    generation:
-      model: "TheBloke/Mistral-7B-Instruct-v0.1-GGUF"
+      model: "TheBloke/Llama-2-7B-Chat-GGUF"
       quantization: "q4_k_m"
