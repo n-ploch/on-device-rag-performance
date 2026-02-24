@@ -7,7 +7,7 @@ This module defines the data contracts shared between:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -106,3 +106,15 @@ class GenerateResponse(BaseModel):
     retrieval_data: RetrievalData
     inference_measurement: InferenceMeasurement
     hardware_measurement: HardwareMeasurement
+
+
+class CorpusDocument(BaseModel):
+    """Generic corpus document for embedding.
+
+    This is the dataset-agnostic interface used by the worker's EmbeddingService.
+    Any dataset loader must transform its documents into this format.
+    """
+
+    id: str
+    text: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
