@@ -18,6 +18,7 @@ from pathlib import Path
 import httpx
 
 from orchestrator.config import EvalConfig
+from orchestrator.models.loader import ModelLoaderError, ensure_models
 from shared_types.dataset_loader import DatasetLoader, get_dataset_dir
 from shared_types.schemas import RunConfig
 
@@ -32,6 +33,12 @@ class DatasetNotFoundError(Exception):
 
 class WorkerNotReadyError(Exception):
     """Raised when the worker is not ready to accept requests."""
+
+    pass
+
+
+class ModelPreparationError(Exception):
+    """Raised when model preparation fails."""
 
     pass
 
@@ -91,6 +98,7 @@ class Orchestrator:
         config: EvalConfig,
         worker_url: str | None = None,
         datasets_dir: Path | None = None,
+        models_dir: Path | None = None,
     ):
         """Initialize the orchestrator.
 
@@ -100,6 +108,8 @@ class Orchestrator:
                 environment variable or http://localhost:8000.
             datasets_dir: Base directory for datasets. Falls back to
                 LOCAL_DATASETS_DIR environment variable.
+            models_dir: Base directory for models. Falls back to
+                LOCAL_MODELS_DIR environment variable.
         """
         self.config = config
         self.worker_url = worker_url or os.environ.get(
@@ -109,6 +119,11 @@ class Orchestrator:
             Path(datasets_dir)
             if datasets_dir
             else Path(os.environ.get("LOCAL_DATASETS_DIR", "./local/datasets"))
+        )
+        self.models_dir = (
+            Path(models_dir)
+            if models_dir
+            else Path(os.environ.get("LOCAL_MODELS_DIR", "./local/models"))
         )
         self._client: httpx.AsyncClient | None = None
 
@@ -356,20 +371,49 @@ class Orchestrator:
 
         return statuses
 
+    def _ensure_models(self) -> None:
+        """Ensure all required models are available locally.
+
+        Downloads missing models from HuggingFace Hub.
+
+        Raises:
+            ModelPreparationError: If model preparation fails.
+        """
+        try:
+            statuses = ensure_models(self.config, self.models_dir)
+            for status in statuses:
+                if status.downloaded:
+                    logger.info(
+                        "Downloaded model: %s (%s)", status.repo, status.quantization
+                    )
+                else:
+                    logger.debug(
+                        "Model already available: %s (%s)",
+                        status.repo,
+                        status.quantization,
+                    )
+        except ModelLoaderError as e:
+            raise ModelPreparationError(f"Model preparation failed: {e}") from e
+
     async def validate_prerequisites(self) -> None:
         """Validate all prerequisites before running evaluation.
 
         This checks:
+        0. Models are available (downloads missing ones)
         1. Dataset files exist locally
         2. Worker is healthy and models are loaded
         3. Collections exist (or can be built)
 
         Raises:
+            ModelPreparationError: If model preparation fails.
             DatasetNotFoundError: If dataset files are missing.
             WorkerNotReadyError: If worker is not ready.
             httpx.HTTPError: If worker communication fails.
         """
         logger.info("Validating prerequisites...")
+
+        # 0. Ensure models are available
+        self._ensure_models()
 
         # 1. Check dataset
         self.validate_dataset()
