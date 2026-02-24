@@ -2,8 +2,12 @@
 # See README.md for full documentation
 
 dataset:
+  id: "scifact"
   source: "allenai/scifact"
-  path: "./data/scifact_gold_standard.json"
+  # Storage path: $LOCAL_DATASETS_DIR/{id}/ (env var defaults to ./local/datasets)
+  limits:
+    corpus: 1000  # Limit corpus documents (null for all)
+    ground_truth: null  # Limit ground truth samples (null for all)
 
 observability:
   langfuse: false  # Set to true for Langfuse cloud, false for local JSONL
