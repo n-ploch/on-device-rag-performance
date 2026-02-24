@@ -1,0 +1,338 @@
+"""RAG evaluation orchestrator.
+
+The orchestrator is the main controller for running RAG evaluation benchmarks.
+It handles:
+- Loading and validating configuration
+- Checking that datasets and models exist
+- Ensuring collections are built (via worker API)
+- Running evaluation loops and collecting metrics
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+import httpx
+
+from orchestrator.config import EvalConfig
+from shared_types.dataset_loader import get_dataset_dir
+from shared_types.schemas import RunConfig
+
+logger = logging.getLogger(__name__)
+
+
+class DatasetNotFoundError(Exception):
+    """Raised when required dataset files are missing."""
+
+    pass
+
+
+class WorkerNotReadyError(Exception):
+    """Raised when the worker is not ready to accept requests."""
+
+    pass
+
+
+@dataclass
+class DatasetValidation:
+    """Result of dataset validation."""
+
+    dataset_id: str
+    corpus_path: Path
+    ground_truth_path: Path
+    corpus_exists: bool
+    ground_truth_exists: bool
+
+    @property
+    def is_valid(self) -> bool:
+        """Check if all required files exist."""
+        return self.corpus_exists and self.ground_truth_exists
+
+
+@dataclass
+class WorkerHealth:
+    """Worker health status."""
+
+    status: str
+    backend: str
+    models_loaded: bool
+
+    @property
+    def is_ready(self) -> bool:
+        """Check if worker is ready to accept requests."""
+        return self.status == "healthy" and self.models_loaded
+
+
+@dataclass
+class CollectionStatus:
+    """Status of a collection for a run config."""
+
+    run_id: str
+    exists: bool
+    populated: bool
+    chunk_count: int | None = None
+
+
+class Orchestrator:
+    """Main orchestrator for RAG evaluation.
+
+    The orchestrator coordinates the evaluation process:
+    1. Validates that required datasets exist locally
+    2. Checks that the worker is healthy and models are loaded
+    3. Ensures collections are built for each run config
+    4. Runs evaluation and collects metrics (future)
+    """
+
+    def __init__(
+        self,
+        config: EvalConfig,
+        worker_url: str | None = None,
+        datasets_dir: Path | None = None,
+    ):
+        """Initialize the orchestrator.
+
+        Args:
+            config: Evaluation configuration.
+            worker_url: URL of the worker service. Falls back to WORKER_URL
+                environment variable or http://localhost:8000.
+            datasets_dir: Base directory for datasets. Falls back to
+                LOCAL_DATASETS_DIR environment variable.
+        """
+        self.config = config
+        self.worker_url = worker_url or os.environ.get(
+            "WORKER_URL", "http://localhost:8000"
+        )
+        self.datasets_dir = (
+            Path(datasets_dir)
+            if datasets_dir
+            else Path(os.environ.get("LOCAL_DATASETS_DIR", "./local/datasets"))
+        )
+        self._client: httpx.AsyncClient | None = None
+
+        logger.info("Orchestrator initialized: worker_url=%s", self.worker_url)
+
+    async def __aenter__(self) -> "Orchestrator":
+        """Enter async context and create HTTP client."""
+        self._client = httpx.AsyncClient(
+            base_url=self.worker_url,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+        )
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit async context and close HTTP client."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+    def validate_dataset(self) -> DatasetValidation:
+        """Check that required dataset files exist locally.
+
+        Returns:
+            DatasetValidation with paths and existence status.
+
+        Raises:
+            DatasetNotFoundError: If required files are missing.
+        """
+        dataset_id = self.config.dataset.id
+        dataset_dir = get_dataset_dir(dataset_id, self.datasets_dir)
+
+        corpus_path = dataset_dir / "corpus.parquet"
+        ground_truth_path = dataset_dir / "ground_truth.parquet"
+
+        validation = DatasetValidation(
+            dataset_id=dataset_id,
+            corpus_path=corpus_path,
+            ground_truth_path=ground_truth_path,
+            corpus_exists=corpus_path.exists(),
+            ground_truth_exists=ground_truth_path.exists(),
+        )
+
+        if not validation.is_valid:
+            missing = []
+            if not validation.corpus_exists:
+                missing.append(f"corpus.parquet (expected at {corpus_path})")
+            if not validation.ground_truth_exists:
+                missing.append(f"ground_truth.parquet (expected at {ground_truth_path})")
+
+            raise DatasetNotFoundError(
+                f"Dataset '{dataset_id}' is missing required files: {', '.join(missing)}. "
+                f"Run the dataset export first to create these files."
+            )
+
+        logger.info(
+            "Dataset '%s' validated: corpus=%s, ground_truth=%s",
+            dataset_id,
+            corpus_path,
+            ground_truth_path,
+        )
+        return validation
+
+    async def check_worker_health(self) -> WorkerHealth:
+        """Check that the worker is healthy and ready.
+
+        Returns:
+            WorkerHealth with status information.
+
+        Raises:
+            WorkerNotReadyError: If worker is not ready.
+            httpx.HTTPError: If connection fails.
+        """
+        if not self._client:
+            raise RuntimeError("Orchestrator must be used as async context manager")
+
+        response = await self._client.get("/health")
+        response.raise_for_status()
+
+        data = response.json()
+        health = WorkerHealth(
+            status=data.get("status", "unknown"),
+            backend=data.get("backend", "unknown"),
+            models_loaded=data.get("models_loaded", False),
+        )
+
+        if not health.is_ready:
+            raise WorkerNotReadyError(
+                f"Worker is not ready: status={health.status}, "
+                f"models_loaded={health.models_loaded}"
+            )
+
+        logger.info(
+            "Worker health check passed: status=%s, backend=%s, models_loaded=%s",
+            health.status,
+            health.backend,
+            health.models_loaded,
+        )
+        return health
+
+    async def check_collection_status(
+        self,
+        run_config: RunConfig,
+    ) -> CollectionStatus:
+        """Check if a collection exists for a run config.
+
+        Args:
+            run_config: The run configuration to check.
+
+        Returns:
+            CollectionStatus with existence and population info.
+        """
+        if not self._client:
+            raise RuntimeError("Orchestrator must be used as async context manager")
+
+        response = await self._client.post(
+            "/collection/status",
+            json={
+                "dataset_id": self.config.dataset.id,
+                "retrieval_config": run_config.retrieval.model_dump(),
+            },
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        status = CollectionStatus(
+            run_id=run_config.run_id,
+            exists=data.get("exists", False),
+            populated=data.get("populated", False),
+            chunk_count=data.get("chunk_count"),
+        )
+
+        logger.debug(
+            "Collection status for %s: exists=%s, populated=%s, chunks=%s",
+            run_config.run_id,
+            status.exists,
+            status.populated,
+            status.chunk_count,
+        )
+        return status
+
+    async def build_collection(self, run_config: RunConfig) -> CollectionStatus:
+        """Build a collection for a run config via worker API.
+
+        This triggers the worker to embed the corpus and create a
+        ChromaDB collection for the given retrieval configuration.
+
+        Args:
+            run_config: The run configuration to build collection for.
+
+        Returns:
+            CollectionStatus after building.
+        """
+        if not self._client:
+            raise RuntimeError("Orchestrator must be used as async context manager")
+
+        logger.info("Building collection for run_id=%s", run_config.run_id)
+
+        response = await self._client.post(
+            "/collection/build",
+            json={
+                "dataset_id": self.config.dataset.id,
+                "retrieval_config": run_config.retrieval.model_dump(),
+            },
+            timeout=httpx.Timeout(600.0),  # Long timeout for embedding
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        logger.info(
+            "Collection built for %s: chunks=%d, already_existed=%s",
+            run_config.run_id,
+            data.get("chunks_embedded", 0),
+            data.get("already_existed", False),
+        )
+
+        return CollectionStatus(
+            run_id=run_config.run_id,
+            exists=True,
+            populated=True,
+            chunk_count=data.get("chunks_embedded"),
+        )
+
+    async def ensure_collections(self) -> list[CollectionStatus]:
+        """Ensure all collections exist for configured run configs.
+
+        Checks each run config and builds missing collections.
+
+        Returns:
+            List of CollectionStatus for all run configs.
+        """
+        statuses: list[CollectionStatus] = []
+
+        for run_config in self.config.run_configs:
+            status = await self.check_collection_status(run_config)
+
+            if not status.populated:
+                status = await self.build_collection(run_config)
+
+            statuses.append(status)
+
+        return statuses
+
+    async def validate_prerequisites(self) -> None:
+        """Validate all prerequisites before running evaluation.
+
+        This checks:
+        1. Dataset files exist locally
+        2. Worker is healthy and models are loaded
+        3. Collections exist (or can be built)
+
+        Raises:
+            DatasetNotFoundError: If dataset files are missing.
+            WorkerNotReadyError: If worker is not ready.
+            httpx.HTTPError: If worker communication fails.
+        """
+        logger.info("Validating prerequisites...")
+
+        # 1. Check dataset
+        self.validate_dataset()
+
+        # 2. Check worker
+        await self.check_worker_health()
+
+        # 3. Ensure collections (will build if missing)
+        await self.ensure_collections()
+
+        logger.info("All prerequisites validated successfully")
