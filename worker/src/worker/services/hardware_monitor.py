@@ -35,7 +35,15 @@ class HardwareMonitor:
 
     async def __aenter__(self) -> "HardwareMonitor":
         self._swap_start = psutil.swap_memory()
+
+        # Prime cpu_percent() - first call always returns 0.0
+        psutil.cpu_percent()
+
         self._active = True
+
+        # Capture first sample immediately before starting the loop
+        self._capture_sample()
+
         self._task = asyncio.create_task(self._sample_loop())
         return self
 
@@ -43,6 +51,12 @@ class HardwareMonitor:
         self._active = False
         if self._task is not None:
             await self._task
+
+        # Capture final sample to ensure we have measurements at exit
+        try:
+            self._capture_sample()
+        except Exception as e:
+            logger.warning("Final hardware sample error: %s", e)
 
         swap_end = psutil.swap_memory()
         swap_in = max(0, int(swap_end.sin - self._swap_start.sin))
