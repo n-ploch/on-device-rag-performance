@@ -74,6 +74,14 @@ class TestEmbeddingService:
             assert isinstance(result, EmbeddingResult)
             assert result.total_documents == 3
             assert result.already_existed is False
+            assert result.collection_path.parent == tmp_path
+            assert result.collection_name == result.collection_path.name
+            mock_chromadb.PersistentClient.assert_called_once_with(path=str(result.collection_path))
+            mock_client.get_or_create_collection.assert_called_once()
+            assert (
+                mock_client.get_or_create_collection.call_args[1]["name"]
+                == EmbeddingService.CHROMA_COLLECTION_NAME
+            )
             mock_collection.add.assert_called()
 
     def test_embed_corpus_skips_existing_collection(
@@ -96,6 +104,9 @@ class TestEmbeddingService:
 
             assert result.already_existed is True
             assert result.total_chunks == 10
+            assert result.collection_path.parent == tmp_path
+            assert result.collection_name == result.collection_path.name
+            mock_chromadb.PersistentClient.assert_called_once_with(path=str(result.collection_path))
             mock_collection.add.assert_not_called()
 
     def test_embed_corpus_with_no_chunking(
@@ -132,9 +143,12 @@ class TestEmbeddingService:
             mock_chromadb.PersistentClient.return_value = mock_client
 
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
+            resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
             result = service.collection_exists("scifact", retrieval_config)
 
             assert result is True
+            mock_chromadb.PersistentClient.assert_called_once_with(path=str(resolved_path))
+            mock_client.get_collection.assert_called_once_with(name=EmbeddingService.CHROMA_COLLECTION_NAME)
 
     def test_collection_exists_returns_false_for_missing(
         self, tmp_path, mock_embedder, retrieval_config
@@ -146,9 +160,11 @@ class TestEmbeddingService:
             mock_chromadb.PersistentClient.return_value = mock_client
 
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
+            resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
             result = service.collection_exists("scifact", retrieval_config)
 
             assert result is False
+            mock_chromadb.PersistentClient.assert_called_once_with(path=str(resolved_path))
 
     def test_collection_exists_returns_false_for_chromadb_not_found(
         self, tmp_path, mock_embedder, retrieval_config
@@ -163,9 +179,22 @@ class TestEmbeddingService:
             mock_chromadb.PersistentClient.return_value = mock_client
 
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
+            resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
             result = service.collection_exists("scifact", retrieval_config)
 
             assert result is False
+            mock_chromadb.PersistentClient.assert_called_once_with(path=str(resolved_path))
+
+    def test_collection_exists_returns_false_when_registry_has_no_match(
+        self, tmp_path, mock_embedder, retrieval_config
+    ):
+        """collection_exists returns False when registry has no entry."""
+        with patch("worker.services.embedding.chromadb") as mock_chromadb:
+            service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
+            result = service.collection_exists("scifact", retrieval_config)
+
+            assert result is False
+            mock_chromadb.PersistentClient.assert_not_called()
 
     def test_progress_callback_invoked(
         self, tmp_path, mock_embedder, sample_corpus, retrieval_config_no_chunking
@@ -198,10 +227,10 @@ class TestEmbeddingService:
             assert last_update.chunks_embedded == 3
             assert last_update.total_chunks == 3
 
-    def test_collection_name_matches_retrieval_service(
+    def test_collection_name_matches_registry_folder_name(
         self, tmp_path, mock_embedder, retrieval_config
     ):
-        """Collection names match RetrievalService naming convention."""
+        """Embedding result collection_name is the allocated folder name."""
         with patch("worker.services.embedding.chromadb") as mock_chromadb:
             mock_collection = MagicMock()
             mock_collection.count.return_value = 0
@@ -217,8 +246,7 @@ class TestEmbeddingService:
                 retrieval_config=retrieval_config,
             )
 
-            # Name should include dataset, model, quantization, dimensions
-            assert "scifact" in result.collection_name
+            assert result.collection_name == result.collection_path.name
             assert "multilingual-e5-small" in result.collection_name
             assert "fp16" in result.collection_name
             assert "384" in result.collection_name

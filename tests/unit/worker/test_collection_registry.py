@@ -113,4 +113,31 @@ class TestCollectionRegistry:
             assert len(by_hash) == 1
 
             leaf_metadata = json.loads((path_a / "metadata.json").read_text())
+            assert leaf_metadata["chroma_collection_name"] == "chunks"
             assert leaf_metadata["retrieval_config"] == config.model_dump(mode="json", exclude_none=True)
+
+    def test_resolve_collection_path_returns_exact_match(self, tmp_path):
+        with patch.dict("os.environ", {"LOCAL_COLLECTIONS_DIR": str(tmp_path)}):
+            from worker.services.collection_registry import CollectionRegistry
+
+            registry = CollectionRegistry()
+            config = _fixed(chunk_size=500)
+            created_path = registry.get_or_create_collection("scifact", config)
+
+            resolved_path = registry.resolve_collection_path("scifact", config)
+
+            assert resolved_path == created_path
+
+    def test_resolve_collection_path_returns_none_for_different_chunking(self, tmp_path):
+        with patch.dict("os.environ", {"LOCAL_COLLECTIONS_DIR": str(tmp_path)}):
+            from worker.services.collection_registry import CollectionRegistry
+
+            registry = CollectionRegistry()
+            registry.get_or_create_collection("scifact", _fixed(chunk_size=500, chunk_overlap=64))
+
+            resolved_path = registry.resolve_collection_path(
+                "scifact",
+                _fixed(chunk_size=700, chunk_overlap=32),
+            )
+
+            assert resolved_path is None

@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Callable, Protocol
 import chromadb
 
 from shared_types import CorpusDocument
-from shared_types.naming import collection_base_key
 from shared_types.schemas import ChunkingConfig, RetrievalConfig
 from worker.services.chromadb_bridge import LlamaEmbeddingFunction
 from worker.services.collection_registry import CollectionRegistry
@@ -68,6 +67,7 @@ class EmbeddingService:
     """
 
     DEFAULT_BATCH_SIZE = 32
+    CHROMA_COLLECTION_NAME = "chunks"
 
     def __init__(
         self,
@@ -110,16 +110,17 @@ class EmbeddingService:
         Returns:
             EmbeddingResult with collection info and statistics.
         """
-        collection_name = self._resolve_collection_name(dataset_id, retrieval_config)
+        collection_path = self._registry.get_or_create_collection(dataset_id, retrieval_config)
+        collection_name = collection_path.name
 
         # Check if collection already exists and is populated
-        client = chromadb.PersistentClient(path=str(self._collections_dir))
+        client = chromadb.PersistentClient(path=str(collection_path))
 
         try:
-            existing = client.get_collection(name=collection_name)
+            existing = client.get_collection(name=self.CHROMA_COLLECTION_NAME)
             if existing.count() > 0:
                 return EmbeddingResult(
-                    collection_path=self._collections_dir / collection_name,
+                    collection_path=collection_path,
                     collection_name=collection_name,
                     total_documents=len(corpus),
                     total_chunks=existing.count(),
@@ -131,15 +132,12 @@ class EmbeddingService:
             else:
                 raise
 
-        # Ensure collection path exists via registry
-        self._registry.get_or_create_collection(dataset_id, retrieval_config)
-
         # Chunk documents
         chunks = self._chunk_documents(corpus, retrieval_config.chunking)
 
         # Create collection with embedding function
         collection = client.get_or_create_collection(
-            name=collection_name,
+            name=self.CHROMA_COLLECTION_NAME,
             embedding_function=self._embedding_fn,
             metadata={
                 "dataset": dataset_id,
@@ -159,7 +157,7 @@ class EmbeddingService:
         )
 
         return EmbeddingResult(
-            collection_path=self._collections_dir / collection_name,
+            collection_path=collection_path,
             collection_name=collection_name,
             total_documents=len(corpus),
             total_chunks=len(chunks),
@@ -180,33 +178,27 @@ class EmbeddingService:
         Returns:
             True if collection exists and has documents, False otherwise.
         """
-        collection_name = self._resolve_collection_name(dataset_id, retrieval_config)
-        client = chromadb.PersistentClient(path=str(self._collections_dir))
+        collection_path = self._registry.resolve_collection_path(dataset_id, retrieval_config)
+        if collection_path is None:
+            return False
+
+        client = chromadb.PersistentClient(path=str(collection_path))
 
         try:
-            collection = client.get_collection(name=collection_name)
+            collection = client.get_collection(name=self.CHROMA_COLLECTION_NAME)
             return collection.count() > 0
         except Exception as e:
             if _is_missing_collection_error(e):
                 return False
             raise
 
-    def _resolve_collection_name(
+    def resolve_collection_path(
         self,
         dataset_id: str,
         retrieval_config: RetrievalConfig,
-    ) -> str:
-        """Resolve collection name from config.
-
-        Uses the same naming convention as RetrievalService for compatibility:
-        {dataset}_{model}__{quantization}__{dimensions}_0
-        """
-        base = collection_base_key(
-            retrieval_config.model,
-            retrieval_config.quantization,
-            retrieval_config.dimensions,
-        )
-        return f"{dataset_id}_{base}_0"
+    ) -> Path | None:
+        """Resolve collection folder path for exact dataset/config match."""
+        return self._registry.resolve_collection_path(dataset_id, retrieval_config)
 
     def _chunk_documents(
         self,

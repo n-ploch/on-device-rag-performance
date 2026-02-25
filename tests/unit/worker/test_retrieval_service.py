@@ -50,9 +50,13 @@ class TestRetrievalService:
                 collections_dir=tmp_path,
                 dataset_id="scifact",
             )
+            resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
 
             results = service.retrieve("What reduces inflammation?", retrieval_config)
 
+            mock_chromadb.PersistentClient.assert_called_once_with(path=str(resolved_path))
+            mock_client.get_collection.assert_called_once()
+            assert mock_client.get_collection.call_args[1]["name"] == service.CHROMA_COLLECTION_NAME
             mock_collection.query.assert_called_once()
             call_kwargs = mock_collection.query.call_args[1]
             assert call_kwargs["query_texts"] == ["What reduces inflammation?"]
@@ -81,13 +85,15 @@ class TestRetrievalService:
             from worker.services.retrieval import RetrievalService
 
             service = RetrievalService(embedder=mock_embedder, collections_dir=tmp_path)
+            resolved_path = service._registry.get_or_create_collection("scifact", config)
             service.retrieve("test query", config)
 
+            mock_chromadb.PersistentClient.assert_called_once_with(path=str(resolved_path))
             call_kwargs = mock_collection.query.call_args[1]
             assert call_kwargs["n_results"] == 10
 
-    def test_collection_name_includes_model_quant_dimensions(self, tmp_path, mock_embedder, retrieval_config):
-        """Collection name follows naming convention."""
+    def test_retrieve_uses_registry_resolved_collection_path(self, tmp_path, mock_embedder, retrieval_config):
+        """Retrieval uses a per-collection folder and fixed Chroma collection name."""
         with patch("worker.services.retrieval.chromadb") as mock_chromadb:
             mock_collection = MagicMock()
             mock_collection.query.return_value = {"ids": [[]], "documents": [[]], "metadatas": [[]]}
@@ -102,9 +108,26 @@ class TestRetrievalService:
                 collections_dir=tmp_path,
                 dataset_id="scifact",
             )
+            resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
             service.retrieve("test", retrieval_config)
 
-            collection_name = mock_client.get_collection.call_args[1]["name"]
-            assert "multilingual-e5-small" in collection_name
-            assert "fp16" in collection_name
-            assert "384" in collection_name
+            mock_chromadb.PersistentClient.assert_called_once_with(path=str(resolved_path))
+            call_kwargs = mock_client.get_collection.call_args[1]
+            assert call_kwargs["name"] == service.CHROMA_COLLECTION_NAME
+            assert "embedding_function" in call_kwargs
+
+    def test_retrieve_raises_for_missing_registry_entry(self, tmp_path, mock_embedder, retrieval_config):
+        """Retrieval raises a clear error when no registry entry exists."""
+        with patch("worker.services.retrieval.chromadb") as mock_chromadb:
+            from worker.services.retrieval import RetrievalService
+
+            service = RetrievalService(
+                embedder=mock_embedder,
+                collections_dir=tmp_path,
+                dataset_id="scifact",
+            )
+
+            with pytest.raises(ValueError, match="No collection found for dataset"):
+                service.retrieve("test", retrieval_config)
+
+            mock_chromadb.PersistentClient.assert_not_called()

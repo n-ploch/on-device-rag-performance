@@ -8,6 +8,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import chromadb
 from fastapi import FastAPI, Request
 
 from worker.logging_config import setup_logging
@@ -169,19 +170,15 @@ def create_app() -> FastAPI:
 
         # Get chunk count if collection exists
         chunk_count = None
-        collection_name = None
-        if exists:
-            collection_name = embedding_service._resolve_collection_name(
-                request.dataset_id,
-                request.retrieval_config,
-            )
-            import chromadb
-
-            client = chromadb.PersistentClient(
-                path=str(req.app.state.collections_dir)
-            )
+        resolved_path = embedding_service.resolve_collection_path(
+            request.dataset_id,
+            request.retrieval_config,
+        )
+        collection_name = resolved_path.name if resolved_path is not None else None
+        if exists and resolved_path is not None:
+            client = chromadb.PersistentClient(path=str(resolved_path))
             try:
-                collection = client.get_collection(name=collection_name)
+                collection = client.get_collection(name=EmbeddingService.CHROMA_COLLECTION_NAME)
                 chunk_count = collection.count()
             except Exception as e:
                 if _is_missing_collection_error(e):

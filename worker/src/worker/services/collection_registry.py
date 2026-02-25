@@ -35,6 +35,7 @@ class CollectionRegistry:
     """Maintains collection folders and a tree index metadata file."""
 
     INDEX_FILENAME = "metadata.json"
+    CHROMA_COLLECTION_NAME = "chunks"
 
     def __init__(self, collections_dir: Path | None = None):
         if collections_dir is None:
@@ -47,12 +48,79 @@ class CollectionRegistry:
     def get_or_create_collection(self, dataset_id: str, retrieval_config: RetrievalConfig) -> Path:
         """Return existing collection path for exact config, or create a new one."""
         index = self._load_index()
-        retrieval_payload = retrieval_config.model_dump(mode="json", exclude_none=True)
+        retrieval_payload = self._retrieval_payload(retrieval_config)
         config_hash = _hash_payload(retrieval_payload)
+        strategy, signature = _chunking_strategy_and_signature(retrieval_config.chunking)
+        signature_node = self._ensure_signature_node(index, dataset_id, retrieval_config)
 
+        existing = self._resolve_collection_entry(signature_node, config_hash)
+        if existing is not None:
+            return Path(existing["path"])
+
+        collection_name = self._allocate_collection_name(retrieval_config)
+        collection_path = self.collections_dir / collection_name
+        collection_path.mkdir(parents=True, exist_ok=False)
+
+        created_at = datetime.now(timezone.utc).isoformat()
+        collection_metadata = {
+            "dataset": dataset_id,
+            "collection_name": collection_name,
+            "chroma_collection_name": self.CHROMA_COLLECTION_NAME,
+            "created_at": created_at,
+            "retrieval_config": retrieval_payload,
+            "chunking": {"strategy": strategy, "signature": signature},
+            "config_hash": config_hash,
+        }
+        (collection_path / self.INDEX_FILENAME).write_text(json.dumps(collection_metadata, indent=2, sort_keys=True))
+
+        entry = {
+            "collection_name": collection_name,
+            "chroma_collection_name": self.CHROMA_COLLECTION_NAME,
+            "path": str(collection_path),
+            "created_at": created_at,
+        }
+        signature_node["by_config_hash"][config_hash] = entry
+        signature_node["entries"].append(
+            {
+                "config_hash": config_hash,
+                "collection_name": collection_name,
+                "chroma_collection_name": self.CHROMA_COLLECTION_NAME,
+                "path": str(collection_path),
+                "retrieval_config": retrieval_payload,
+            }
+        )
+
+        self._write_index(index)
+        return collection_path
+
+    def resolve_collection_path(self, dataset_id: str, retrieval_config: RetrievalConfig) -> Path | None:
+        """Return collection folder path for exact config match, or None if missing."""
+        index = self._load_index()
+        config_hash = _hash_payload(self._retrieval_payload(retrieval_config))
+        signature_node = self._get_signature_node(index, dataset_id, retrieval_config)
+        if signature_node is None:
+            return None
+
+        existing = self._resolve_collection_entry(signature_node, config_hash)
+        if existing is None:
+            return None
+        return Path(existing["path"])
+
+    def _load_index(self) -> dict:
+        if not self.index_path.exists():
+            return {"version": 1, "datasets": {}}
+        return json.loads(self.index_path.read_text())
+
+    def _write_index(self, index: dict) -> None:
+        self.index_path.write_text(json.dumps(index, indent=2, sort_keys=True))
+
+    def _retrieval_payload(self, retrieval_config: RetrievalConfig) -> dict:
+        return retrieval_config.model_dump(mode="json", exclude_none=True)
+
+    def _ensure_signature_node(self, index: dict, dataset_id: str, retrieval_config: RetrievalConfig) -> dict:
         model_name = normalize_model_name(retrieval_config.model)
         strategy, signature = _chunking_strategy_and_signature(retrieval_config.chunking)
-        signature_node = (
+        return (
             index.setdefault("datasets", {})
             .setdefault(dataset_id, {"models": {}})
             .setdefault("models", {})
@@ -66,50 +134,33 @@ class CollectionRegistry:
             .setdefault(signature, {"by_config_hash": {}, "entries": []})
         )
 
-        existing = signature_node["by_config_hash"].get(config_hash)
-        if existing is not None:
-            return Path(existing["path"])
+    def _get_signature_node(self, index: dict, dataset_id: str, retrieval_config: RetrievalConfig) -> dict | None:
+        model_name = normalize_model_name(retrieval_config.model)
+        strategy, signature = _chunking_strategy_and_signature(retrieval_config.chunking)
 
-        collection_name = self._allocate_collection_name(retrieval_config)
-        collection_path = self.collections_dir / collection_name
-        collection_path.mkdir(parents=True, exist_ok=False)
+        datasets = index.get("datasets", {})
+        dataset_node = datasets.get(dataset_id)
+        if dataset_node is None:
+            return None
 
-        created_at = datetime.now(timezone.utc).isoformat()
-        collection_metadata = {
-            "dataset": dataset_id,
-            "collection_name": collection_name,
-            "created_at": created_at,
-            "retrieval_config": retrieval_payload,
-            "chunking": {"strategy": strategy, "signature": signature},
-            "config_hash": config_hash,
-        }
-        (collection_path / self.INDEX_FILENAME).write_text(json.dumps(collection_metadata, indent=2, sort_keys=True))
+        model_node = dataset_node.get("models", {}).get(model_name)
+        if model_node is None:
+            return None
 
-        entry = {
-            "collection_name": collection_name,
-            "path": str(collection_path),
-            "created_at": created_at,
-        }
-        signature_node["by_config_hash"][config_hash] = entry
-        signature_node["entries"].append(
-            {
-                "config_hash": config_hash,
-                "collection_name": collection_name,
-                "path": str(collection_path),
-                "retrieval_config": retrieval_payload,
-            }
-        )
+        quant_node = model_node.get("quantizations", {}).get(retrieval_config.quantization)
+        if quant_node is None:
+            return None
 
-        self._write_index(index)
-        return collection_path
+        dim_node = quant_node.get("dimensions", {}).get(str(retrieval_config.dimensions))
+        if dim_node is None:
+            return None
 
-    def _load_index(self) -> dict:
-        if not self.index_path.exists():
-            return {"version": 1, "datasets": {}}
-        return json.loads(self.index_path.read_text())
+        chunking_node = dim_node.get("chunking", {})
+        strategy_node = chunking_node.get(strategy, {})
+        return strategy_node.get(signature)
 
-    def _write_index(self, index: dict) -> None:
-        self.index_path.write_text(json.dumps(index, indent=2, sort_keys=True))
+    def _resolve_collection_entry(self, signature_node: dict, config_hash: str) -> dict | None:
+        return signature_node.get("by_config_hash", {}).get(config_hash)
 
     def _allocate_collection_name(self, retrieval_config: RetrievalConfig) -> str:
         base = collection_base_key(

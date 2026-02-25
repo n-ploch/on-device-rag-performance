@@ -123,15 +123,24 @@ class LlamaEmbeddingFunction(EmbeddingFunction[Documents]):
         return [self._embedder.embed(doc) for doc in input]
 ```
 
-### 3. Collection Naming Convention
+### 3. Collection Storage Convention
 
-Collections are named dynamically to prevent dimension mismatches:
+Collection folders are named dynamically to prevent model/dimension mismatches:
 
 ```
-{dataset}_{model}__{quantization}__{dimensions}_{index}
+{model}__{quantization}__{dimensions}_{index}
 
-Example: scifact_mistral-embed__q4_k_m__1024_0
+Example: mistral-embed__q4_k_m__1024_0
 ```
+
+Each collection is fully self-contained in its own folder:
+
+- `<collections_root>/metadata.json`: top-level tree index
+- `<collections_root>/<collection_folder>/metadata.json`: leaf metadata
+- `<collections_root>/<collection_folder>/chroma.sqlite3`: Chroma sqlite
+- `<collections_root>/<collection_folder>/<segment-uuid>/...bin`: Chroma segment files
+
+Inside each collection folder, the internal Chroma collection name is fixed to `chunks`.
 
 ### 4. Hardware Monitoring
 

@@ -5,15 +5,15 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import chromadb
 
 logger = logging.getLogger(__name__)
 
-from shared_types.naming import collection_base_key
 from shared_types.schemas import RetrievalConfig
 from worker.services.chromadb_bridge import LlamaEmbeddingFunction
+from worker.services.collection_registry import CollectionRegistry
 
 if TYPE_CHECKING:
     from worker.models.embedder import Embedder
@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 class RetrievalService:
     """Handles retrieval using pre-built ChromaDB collections."""
+
+    CHROMA_COLLECTION_NAME = "chunks"
 
     def __init__(
         self,
@@ -35,34 +37,32 @@ class RetrievalService:
         if collections_dir is None:
             collections_dir = Path(os.environ["LOCAL_COLLECTIONS_DIR"])
 
-        self._client = chromadb.PersistentClient(path=str(collections_dir))
+        self._registry = CollectionRegistry(collections_dir)
+        self._client_cache: dict[str, Any] = {}
         self._collection_cache: dict[str, chromadb.Collection] = {}
 
     def _get_collection(self, retrieval_config: RetrievalConfig) -> chromadb.Collection:
         """Get or cache a ChromaDB collection for the given config."""
-        collection_name = self._resolve_collection_name(retrieval_config)
+        collection_path = self._registry.resolve_collection_path(self._dataset_id, retrieval_config)
+        if collection_path is None:
+            raise ValueError(
+                "No collection found for dataset "
+                f"'{self._dataset_id}' and retrieval config model='{retrieval_config.model}', "
+                f"quantization='{retrieval_config.quantization}', dimensions={retrieval_config.dimensions}."
+            )
 
-        if collection_name not in self._collection_cache:
-            logger.debug("Loading collection: %s", collection_name)
-            self._collection_cache[collection_name] = self._client.get_collection(
-                name=collection_name,
+        cache_key = str(collection_path)
+        if cache_key not in self._collection_cache:
+            logger.debug("Loading collection from path: %s", collection_path)
+            if cache_key not in self._client_cache:
+                self._client_cache[cache_key] = chromadb.PersistentClient(path=cache_key)
+            client = self._client_cache[cache_key]
+            self._collection_cache[cache_key] = client.get_collection(
+                name=self.CHROMA_COLLECTION_NAME,
                 embedding_function=self._embedding_fn,
             )
 
-        return self._collection_cache[collection_name]
-
-    def _resolve_collection_name(self, retrieval_config: RetrievalConfig) -> str:
-        """Resolve collection name from config.
-
-        Collections are named: {model}__{quantization}__{dimensions}_{index}
-        For pre-built collections, we use index 0.
-        """
-        base = collection_base_key(
-            retrieval_config.model,
-            retrieval_config.quantization,
-            retrieval_config.dimensions,
-        )
-        return f"{self._dataset_id}_{base}_0"
+        return self._collection_cache[cache_key]
 
     def retrieve(self, query: str, retrieval_config: RetrievalConfig) -> list[dict]:
         """Query ChromaDB and return retrieved chunks with metadata.
