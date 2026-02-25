@@ -37,6 +37,8 @@ class ObservabilityConfig(BaseModel):
 
     langfuse: bool = False
     output_jsonl: str = "./logs/traces.jsonl"
+    sys_logs_path: str | None = None  # Path to write Python logs (None = no file)
+    print_logs: bool = True  # Whether to print logs to terminal
 
 
 class EvalConfig(BaseModel):

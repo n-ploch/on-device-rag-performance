@@ -30,6 +30,50 @@ from shared_types.schemas import GenerateRequest, GenerateResponse, RunConfig
 logger = logging.getLogger(__name__)
 
 
+def configure_logging(
+    level: int,
+    print_logs: bool = True,
+    sys_logs_path: str | None = None,
+) -> None:
+    """Configure logging with optional file and console handlers.
+
+    Args:
+        level: Logging level (e.g., logging.INFO, logging.DEBUG).
+        print_logs: Whether to print logs to terminal.
+        sys_logs_path: Optional path to write logs to a file.
+    """
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Clear any existing handlers
+    root_logger.handlers.clear()
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    if print_logs:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setLevel(level)
+        stream_handler.setFormatter(formatter)
+        root_logger.addHandler(stream_handler)
+
+    if sys_logs_path:
+        # Ensure parent directory exists
+        log_path = Path(sys_logs_path)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        file_handler = logging.FileHandler(sys_logs_path)
+        file_handler.setLevel(level)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+    # If no handlers were added, add a NullHandler to prevent "No handlers" warning
+    if not root_logger.handlers:
+        root_logger.addHandler(logging.NullHandler())
+
+
 class EvaluationResult(BaseModel):
     """Combined result for a single evaluation sample."""
 
@@ -200,6 +244,7 @@ async def _run(
     dry_run: bool = False,
     quiet: bool = False,
     run_id_filter: str | None = None,
+    log_level: int = logging.INFO,
 ) -> int:
     """Main async entry point.
 
@@ -208,12 +253,21 @@ async def _run(
         dry_run: If True, validate config and exit without evaluation.
         quiet: If True, suppress progress output.
         run_id_filter: If set, only run the specified run_id.
+        log_level: Logging level to use.
 
     Returns:
         Exit code (0 for success, non-zero for failure).
     """
     # Load configuration
     config = EvalConfig.from_yaml(config_path)
+
+    # Reconfigure logging with settings from config
+    configure_logging(
+        level=log_level,
+        print_logs=config.observability.print_logs,
+        sys_logs_path=config.observability.sys_logs_path,
+    )
+
     logger.info("Loaded config with %d run_configs", len(config.run_configs))
 
     # Filter run configs if specified
@@ -338,13 +392,9 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    # Configure logging
+    # Configure initial logging (will be reconfigured after loading config)
     log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    configure_logging(level=log_level, print_logs=True, sys_logs_path=None)
 
     # Validate config path
     if not args.config.exists():
@@ -358,6 +408,7 @@ def main() -> int:
             dry_run=args.dry_run,
             quiet=args.quiet,
             run_id_filter=args.run_id,
+            log_level=log_level,
         )
     )
 
