@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -105,13 +106,17 @@ def ensure_dataset(orchestrator: Orchestrator) -> None:
 
     Args:
         orchestrator: The orchestrator instance.
+
+    Environment Variables:
+        HF_TOKEN: Optional HuggingFace token for authenticated access.
     """
     try:
         orchestrator.validate_dataset()
         logger.info("Dataset already available")
     except DatasetNotFoundError:
         logger.info("Dataset not found, loading from HuggingFace...")
-        loader = HuggingFaceSciFact()
+        token = os.environ.get("HF_TOKEN")
+        loader = HuggingFaceSciFact(token=token)
         orchestrator.load_dataset(loader)
         logger.info("Dataset loaded successfully")
 
