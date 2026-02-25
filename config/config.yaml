@@ -27,5 +27,5 @@ run_configs:
         chunk_overlap: 64
       k: 3
     generation:
-      model: "TheBloke/Llama-2-7B-Chat-GGUF"
+      model: "mistralai/Ministral-3-3B-Instruct-2512-GGUF"
       quantization: "q4_k_m"
