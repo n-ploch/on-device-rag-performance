@@ -1,12 +1,11 @@
-"""HuggingFace SciFact dataset loader.
+"""HuggingFace BigBio SciFact dataset loader.
 
-Loads the BeIR/scifact dataset and transforms it to the standard
+Loads the bigbio/scifact dataset and transforms it to the standard
 corpus and ground truth formats for the RAG evaluation system.
 
 SciFact is a scientific claim verification dataset where:
-- Corpus: Scientific paper abstracts
-- Queries: Scientific claims to verify
-- Qrels: Relevance judgments mapping claims to supporting documents
+- Corpus: Scientific paper abstracts (from scifact_corpus_source)
+- Claims: Scientific claims with evidence annotations (from scifact_claims_source)
 """
 
 from __future__ import annotations
@@ -30,17 +29,14 @@ logger = logging.getLogger(__name__)
 
 
 class HuggingFaceSciFact(DatasetLoader):
-    """Dataset loader for SciFact from HuggingFace Hub (BeIR format).
+    """Dataset loader for SciFact from HuggingFace Hub (BigBio format).
 
-    Uses the BeIR/scifact dataset which contains:
-    - corpus.jsonl.gz: {_id, title, text, metadata}
-    - queries.jsonl.gz: {_id, text, metadata}
-    - qrels (from BeIR/scifact-qrels): query-id, corpus-id, score
+    Uses the bigbio/scifact dataset which contains:
+    - scifact_corpus_source: {doc_id, title, abstract, structured}
+    - scifact_claims_source: {id, claim, evidences, cited_doc_ids}
     """
 
-    CORPUS_URL = "hf://datasets/BeIR/scifact/corpus.jsonl.gz"
-    QUERIES_URL = "hf://datasets/BeIR/scifact/queries.jsonl.gz"
-    QRELS_URL = "hf://datasets/BeIR/scifact-qrels/test.tsv"
+    DATASET_NAME = "bigbio/scifact"
 
     def __init__(self, cache_dir: Path | None = None):
         """Initialize the SciFact loader.
@@ -50,118 +46,129 @@ class HuggingFaceSciFact(DatasetLoader):
         """
         self._cache_dir = cache_dir
         self._corpus_dataset: Dataset | None = None
-        self._queries_dataset: Dataset | None = None
-        self._qrels_dataset: Dataset | None = None
+        self._claims_dataset: Dataset | None = None
         self._corpus_count: int = 0
         self._ground_truth_count: int = 0
 
     @property
     def dataset_id(self) -> str:
         """Return the dataset identifier."""
-        return "scifact"
+        return "scifact_bigbio"
 
     def _load_corpus(self) -> Dataset:
-        """Lazy-load the corpus."""
+        """Lazy-load the corpus from scifact_corpus_source."""
         if self._corpus_dataset is None:
             from datasets import load_dataset
 
-            logger.info("Loading SciFact corpus from BeIR/scifact")
+            logger.info("Loading SciFact corpus from bigbio/scifact")
             self._corpus_dataset = load_dataset(
-                "json",
-                data_files=self.CORPUS_URL,
+                self.DATASET_NAME,
+                name="scifact_corpus_source",
                 split="train",
                 cache_dir=str(self._cache_dir) if self._cache_dir else None,
+                trust_remote_code=True,
             )
         return self._corpus_dataset
 
-    def _load_queries(self) -> Dataset:
-        """Lazy-load the queries."""
-        if self._queries_dataset is None:
-            from datasets import load_dataset
+    def _load_claims(self, split: str = "train") -> Dataset:
+        """Lazy-load the claims from scifact_claims_source.
 
-            logger.info("Loading SciFact queries from BeIR/scifact")
-            self._queries_dataset = load_dataset(
-                "json",
-                data_files=self.QUERIES_URL,
-                split="train",
-                cache_dir=str(self._cache_dir) if self._cache_dir else None,
-            )
-        return self._queries_dataset
-
-    def _load_qrels(self) -> Dataset:
-        """Lazy-load the relevance judgments."""
-        if self._qrels_dataset is None:
-            from datasets import load_dataset
-
-            logger.info("Loading SciFact qrels from BeIR/scifact-qrels")
-            self._qrels_dataset = load_dataset(
-                "csv",
-                data_files=self.QRELS_URL,
-                delimiter="\t",
-                split="train",
-                cache_dir=str(self._cache_dir) if self._cache_dir else None,
-            )
-        return self._qrels_dataset
-
-    def _build_qrels_index(self) -> dict[str, list[str]]:
-        """Build index mapping query_id to list of relevant corpus_ids.
-
-        Returns:
-            Dict mapping query_id (str) to list of corpus_ids (str).
+        Args:
+            split: Dataset split to load ('train', 'validation', or 'test').
         """
-        qrels = self._load_qrels()
-        index: dict[str, list[str]] = {}
-        for row in qrels:
-            query_id = str(row["query-id"])
-            corpus_id = str(row["corpus-id"])
-            if query_id not in index:
-                index[query_id] = []
-            index[query_id].append(corpus_id)
-        return index
+        if self._claims_dataset is None:
+            from datasets import load_dataset
+
+            logger.info("Loading SciFact claims from bigbio/scifact (split=%s)", split)
+            self._claims_dataset = load_dataset(
+                self.DATASET_NAME,
+                name="scifact_claims_source",
+                split=split,
+                cache_dir=str(self._cache_dir) if self._cache_dir else None,
+                trust_remote_code=True,
+            )
+        return self._claims_dataset
 
     def _transform_corpus_document(self, row: dict[str, Any]) -> CorpusDocument:
-        """Transform a BeIR corpus row to generic CorpusDocument."""
+        """Transform a BigBio corpus row to generic CorpusDocument.
+
+        BigBio format:
+            - doc_id: int
+            - title: str
+            - abstract: list[str] (sentences)
+            - structured: bool
+        """
+        # Join abstract sentences into single text
+        abstract_sentences = row.get("abstract", [])
+        text = " ".join(abstract_sentences) if abstract_sentences else ""
+
         return CorpusDocument(
-            id=str(row["_id"]),
-            text=row.get("text", ""),
+            id=str(row["doc_id"]),
+            text=text,
             metadata={
                 "title": row.get("title"),
+                "structured": row.get("structured", False),
+                "sentence_count": len(abstract_sentences),
             },
         )
 
-    def _transform_ground_truth(
-        self,
-        row: dict[str, Any],
-        qrels_index: dict[str, list[str]],
-    ) -> GroundTruthEntry:
-        """Transform a SciFact query to GroundTruthEntry."""
-        query_id = str(row["_id"])
-        supporting_docs = qrels_index.get(query_id, [])
+    def _transform_ground_truth(self, row: dict[str, Any]) -> GroundTruthEntry:
+        """Transform a BigBio claim to GroundTruthEntry.
 
-        # BeIR format doesn't have sentence-level evidence, just doc-level
+        BigBio format:
+            - id: int
+            - claim: str
+            - evidences: list[{doc_id, sentence_ids, label}]
+            - cited_doc_ids: list[int]
+        """
+        claim_id = str(row["id"])
+        claim_text = row["claim"]
+        evidences = row.get("evidences", [])
+        cited_doc_ids = [str(doc_id) for doc_id in row.get("cited_doc_ids", [])]
+
+        # Build evidence list from BigBio evidence annotations
         evidence_list: list[DocumentEvidence] = []
-        for doc_id in supporting_docs:
+        labels_found: set[str] = set()
+
+        for evidence in evidences:
+            doc_id = str(evidence["doc_id"])
+            sentence_ids = evidence.get("sentence_ids", [])
+            label = evidence.get("label", "SUPPORT")
+            labels_found.add(label)
+
+            # Create sentence evidence (we don't have the actual text here)
+            sentence_evidence = SentenceEvidence(
+                sentence_indices=sentence_ids,
+                sentence_texts=[],  # Texts would need to be looked up from corpus
+                label=label,
+            )
+
             evidence_list.append(
                 DocumentEvidence(
                     doc_id=doc_id,
                     doc_title=None,
-                    sentences=[],
+                    sentences=[sentence_evidence],
                 )
             )
 
-        # Determine label based on whether there are supporting docs
-        if supporting_docs:
+        # Determine expected label
+        # Priority: CONTRADICT > SUPPORT > NOT_ENOUGH_INFO
+        if "CONTRADICT" in labels_found:
+            expected_label = "CONTRADICT"
+        elif "SUPPORT" in labels_found:
+            expected_label = "SUPPORT"
+        elif cited_doc_ids:
             expected_label = "SUPPORT"
         else:
             expected_label = "NOT_ENOUGH_INFO"
 
         return GroundTruthEntry(
-            id=query_id,
-            input=row["text"],
+            id=claim_id,
+            input=claim_text,
             expected_label=expected_label,
-            supporting_documents=supporting_docs,
+            supporting_documents=cited_doc_ids,
             evidence=evidence_list,
-            cited_doc_ids=supporting_docs,
+            cited_doc_ids=cited_doc_ids,
         )
 
     def _iter_corpus(self, limit: int | None = None) -> Iterator[CorpusDocument]:
@@ -172,17 +179,13 @@ class HuggingFaceSciFact(DatasetLoader):
                 break
             yield self._transform_corpus_document(row)
 
-    def _iter_ground_truth(
-        self,
-        qrels_index: dict[str, list[str]],
-        limit: int | None = None,
-    ) -> Iterator[GroundTruthEntry]:
+    def _iter_ground_truth(self, limit: int | None = None) -> Iterator[GroundTruthEntry]:
         """Iterate over ground truth entries."""
-        queries = self._load_queries()
-        for i, row in enumerate(queries):
+        claims = self._load_claims()
+        for i, row in enumerate(claims):
             if limit is not None and i >= limit:
                 break
-            yield self._transform_ground_truth(row, qrels_index)
+            yield self._transform_ground_truth(row)
 
     def export_corpus(self, output_dir: Path, limit: int | None = None) -> Path:
         """Export corpus to Parquet format."""
@@ -203,12 +206,7 @@ class HuggingFaceSciFact(DatasetLoader):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build qrels index for relevance judgments
-        qrels_index = self._build_qrels_index()
-
-        records = [
-            entry.model_dump() for entry in self._iter_ground_truth(qrels_index, limit=limit)
-        ]
+        records = [entry.model_dump() for entry in self._iter_ground_truth(limit=limit)]
         self._ground_truth_count = len(records)
 
         table = pa.Table.from_pylist(records)
@@ -224,10 +222,9 @@ class HuggingFaceSciFact(DatasetLoader):
 
         metadata = {
             "dataset_id": self.dataset_id,
-            "source": "BeIR/scifact",
-            "corpus_url": self.CORPUS_URL,
-            "queries_url": self.QUERIES_URL,
-            "qrels_url": self.QRELS_URL,
+            "source": self.DATASET_NAME,
+            "corpus_config": "scifact_corpus_source",
+            "claims_config": "scifact_claims_source",
             "corpus_count": self._corpus_count,
             "ground_truth_count": self._ground_truth_count,
             "created_at": datetime.now(timezone.utc).isoformat(),
