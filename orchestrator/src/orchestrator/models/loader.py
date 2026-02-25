@@ -158,12 +158,13 @@ def is_model_available(
     return True, filename
 
 
-def find_gguf_file(repo: str, quantization: str) -> str:
+def find_gguf_file(repo: str, quantization: str, token: str | None = None) -> str:
     """Find GGUF filename matching quantization in HuggingFace repo.
 
     Args:
         repo: HuggingFace repository identifier.
         quantization: Quantization level (e.g., "q4_k_m").
+        token: Optional HuggingFace token for authenticated access.
 
     Returns:
         Filename of the matching GGUF file.
@@ -172,7 +173,7 @@ def find_gguf_file(repo: str, quantization: str) -> str:
         ModelNotFoundError: If no matching GGUF file is found.
     """
     try:
-        files = list_repo_files(repo)
+        files = list_repo_files(repo, token=token)
     except Exception as e:
         raise ModelNotFoundError(f"Cannot list files in repo '{repo}': {e}") from e
 
@@ -203,12 +204,15 @@ def find_gguf_file(repo: str, quantization: str) -> str:
         )
 
 
-def download_gguf_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
+def download_gguf_model(
+    spec: ModelSpec, models_dir: Path, token: str | None = None
+) -> ModelStatus:
     """Download a GGUF model file from HuggingFace Hub.
 
     Args:
         spec: Model specification with repo and quantization.
         models_dir: Directory to store the model.
+        token: Optional HuggingFace token for authenticated access.
 
     Returns:
         ModelStatus with download result.
@@ -219,7 +223,7 @@ def download_gguf_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
     logger.info("Downloading GGUF model: %s (%s)", spec.repo, spec.quantization)
 
     # Find the correct file
-    filename = find_gguf_file(spec.repo, spec.quantization)
+    filename = find_gguf_file(spec.repo, spec.quantization, token=token)
 
     # Create storage directory
     storage_dir = models_dir / model_storage_key(spec.repo, spec.quantization)
@@ -232,6 +236,7 @@ def download_gguf_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
             filename=filename,
             local_dir=storage_dir,
             local_dir_use_symlinks=False,
+            token=token,
         )
     except Exception as e:
         raise DownloadError(
@@ -256,7 +261,9 @@ def download_gguf_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
     )
 
 
-def download_retrieval_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
+def download_retrieval_model(
+    spec: ModelSpec, models_dir: Path, token: str | None = None
+) -> ModelStatus:
     """Download a retrieval model GGUF file from HuggingFace Hub.
 
     Retrieval runs through llama.cpp in the worker, so retrieval models must be
@@ -265,6 +272,7 @@ def download_retrieval_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
     Args:
         spec: Model specification with repo and quantization.
         models_dir: Directory to store the model.
+        token: Optional HuggingFace token for authenticated access.
 
     Returns:
         ModelStatus with download result.
@@ -277,7 +285,7 @@ def download_retrieval_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
     )
 
     try:
-        return download_gguf_model(spec, models_dir)
+        return download_gguf_model(spec, models_dir, token=token)
     except ModelNotFoundError as e:
         raise DownloadError(
             f"Failed to download retrieval model '{spec.repo}' as GGUF: {e}. "
@@ -285,7 +293,9 @@ def download_retrieval_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
         ) from e
 
 
-def download_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
+def download_model(
+    spec: ModelSpec, models_dir: Path, token: str | None = None
+) -> ModelStatus:
     """Download a model from HuggingFace Hub.
 
     Routes to the appropriate downloader based on model type.
@@ -293,14 +303,15 @@ def download_model(spec: ModelSpec, models_dir: Path) -> ModelStatus:
     Args:
         spec: Model specification with repo, quantization, and type.
         models_dir: Directory to store the model.
+        token: Optional HuggingFace token for authenticated access.
 
     Returns:
         ModelStatus with download result.
     """
     if spec.model_type == "generation":
-        return download_gguf_model(spec, models_dir)
+        return download_gguf_model(spec, models_dir, token=token)
     else:
-        return download_retrieval_model(spec, models_dir)
+        return download_retrieval_model(spec, models_dir, token=token)
 
 
 def ensure_models(
@@ -320,6 +331,9 @@ def ensure_models(
 
     Raises:
         ModelLoaderError: If any model cannot be loaded.
+
+    Environment Variables:
+        HF_TOKEN: Optional HuggingFace token for authenticated access.
     """
     if models_dir is None:
         env_dir = os.environ.get("LOCAL_MODELS_DIR")
@@ -329,6 +343,7 @@ def ensure_models(
 
     models_dir.mkdir(parents=True, exist_ok=True)
 
+    token = os.environ.get("HF_TOKEN")
     specs = extract_required_models(config)
     statuses: list[ModelStatus] = []
 
@@ -352,7 +367,7 @@ def ensure_models(
                 "Model already available: %s (%s)", spec.repo, spec.quantization
             )
         else:
-            status = download_model(spec, models_dir)
+            status = download_model(spec, models_dir, token=token)
             statuses.append(status)
 
     return statuses

@@ -38,13 +38,15 @@ class HuggingFaceSciFact(DatasetLoader):
 
     DATASET_NAME = "bigbio/scifact"
 
-    def __init__(self, cache_dir: Path | None = None):
+    def __init__(self, cache_dir: Path | None = None, token: str | None = None):
         """Initialize the SciFact loader.
 
         Args:
             cache_dir: Optional directory for HuggingFace cache.
+            token: Optional HuggingFace token for authenticated access.
         """
         self._cache_dir = cache_dir
+        self._token = token
         self._corpus_dataset: Dataset | None = None
         self._claims_dataset: Dataset | None = None
         self._corpus_count: int = 0
@@ -63,10 +65,10 @@ class HuggingFaceSciFact(DatasetLoader):
             logger.info("Loading SciFact corpus from bigbio/scifact")
             self._corpus_dataset = load_dataset(
                 self.DATASET_NAME,
-                name="scifact_corpus_source",
+                "scifact_corpus_source",
                 split="train",
                 cache_dir=str(self._cache_dir) if self._cache_dir else None,
-                trust_remote_code=True,
+                token=self._token,
             )
         return self._corpus_dataset
 
@@ -82,10 +84,10 @@ class HuggingFaceSciFact(DatasetLoader):
             logger.info("Loading SciFact claims from bigbio/scifact (split=%s)", split)
             self._claims_dataset = load_dataset(
                 self.DATASET_NAME,
-                name="scifact_claims_source",
+                "scifact_claims_source",
                 split=split,
                 cache_dir=str(self._cache_dir) if self._cache_dir else None,
-                trust_remote_code=True,
+                token=self._token,
             )
         return self._claims_dataset
 
