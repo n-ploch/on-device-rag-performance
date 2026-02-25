@@ -2,8 +2,8 @@
 # See README.md for full documentation
 
 dataset:
-  id: "scifact"
-  source: "allenai/scifact"
+  id: "scifact_bigbio"
+  source: "bigbio/scifact"
   # Storage path: $LOCAL_DATASETS_DIR/{id}/ (env var defaults to ./local/datasets)
   limits:
     corpus: null  # Limit corpus documents (null for all)
