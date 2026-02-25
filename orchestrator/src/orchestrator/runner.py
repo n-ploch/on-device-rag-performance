@@ -21,7 +21,7 @@ import pyarrow.parquet as pq
 from pydantic import BaseModel
 
 from orchestrator.config import EvalConfig
-from orchestrator.datasets import HuggingFaceSciFact
+from orchestrator.datasets import HuggingFaceRAGBench, HuggingFaceSciFact
 from orchestrator.datasets.schemas import GroundTruthEntry
 from orchestrator.exporters import JSONLSpanExporter, create_exporter, result_to_span
 from orchestrator.metrics import detect_abstention, mrr, precision_at_k, recall_at_k
@@ -116,7 +116,16 @@ def ensure_dataset(orchestrator: Orchestrator) -> None:
     except DatasetNotFoundError:
         logger.info("Dataset not found, loading from HuggingFace...")
         token = os.environ.get("HF_TOKEN")
-        loader = HuggingFaceSciFact(token=token)
+        name = orchestrator.config.dataset.name
+
+        # Select loader based on dataset name
+        if name == "ragbench":
+            loader = HuggingFaceRAGBench(subset="emanual", token=token)
+        elif name == "scifact":
+            loader = HuggingFaceSciFact(token=token)
+        else:
+            raise ValueError(f"Unknown dataset name: {name}")
+
         orchestrator.load_dataset(loader)
         logger.info("Dataset loaded successfully")
 

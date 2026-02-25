@@ -2,12 +2,11 @@
 # See README.md for full documentation
 
 dataset:
-  id: "scifact_bigbio"
-  source: "bigbio/scifact"
-  # Storage path: $LOCAL_DATASETS_DIR/{id}/ (env var defaults to ./local/datasets)
+  id: "ragbench_emanual"
+  name: "ragbench"
   limits:
-    corpus: null  # Limit corpus documents (null for all)
-    ground_truth: null  # Limit ground truth samples (null for all)
+    corpus: null
+    ground_truth: null
 
 observability:
   langfuse: false  # Set to true for Langfuse cloud, false for local JSONL

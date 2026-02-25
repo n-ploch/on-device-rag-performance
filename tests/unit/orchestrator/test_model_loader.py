@@ -29,7 +29,7 @@ from orchestrator.models.loader import (
 def sample_config_data() -> dict:
     """Sample config data for testing."""
     return {
-        "dataset": {"id": "scifact", "source": "allenai/scifact"},
+        "dataset": {"id": "scifact", "name": "scifact"},
         "run_configs": [
             {
                 "run_id": "test_run_1",

@@ -28,7 +28,7 @@ class DatasetConfig(BaseModel):
     """Dataset configuration."""
 
     id: str
-    source: str
+    name: str
     limits: DatasetLimits = Field(default_factory=DatasetLimits)
 
 
