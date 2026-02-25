@@ -13,9 +13,6 @@ observability:
   langfuse: false  # Set to true for Langfuse cloud, false for local JSONL
   output_jsonl: "./logs/traces.jsonl"
 
-paths:
-  log_dir: "./logs/"
-
 run_configs:
   - run_id: "mistral_q4_baseline_001"
     retrieval:

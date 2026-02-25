@@ -14,7 +14,6 @@ from orchestrator.config import EvalConfig
 from orchestrator.datasets.schemas import GroundTruthEntry
 from orchestrator.runner import (
     EvaluationResult,
-    ResultsExporter,
     evaluate_single,
     load_ground_truth,
 )
@@ -124,66 +123,6 @@ class TestEvaluationResult:
         assert result.recall_at_k == 0.5
         assert result.precision_at_k == 0.333
         assert result.mrr == 1.0
-
-
-class TestResultsExporter:
-    """Tests for ResultsExporter class."""
-
-    def test_creates_output_directory(self, tmp_path):
-        """Should create parent directories if needed."""
-        output_path = tmp_path / "nested" / "dir" / "results.jsonl"
-        exporter = ResultsExporter(output_path)
-        exporter.close()
-
-        assert output_path.parent.exists()
-
-    def test_exports_result_as_jsonl(
-        self, tmp_path, sample_ground_truth_entry, sample_generate_response
-    ):
-        """Should write result as JSON line."""
-        output_path = tmp_path / "results.jsonl"
-        exporter = ResultsExporter(output_path)
-
-        result = EvaluationResult(
-            run_id="test_run",
-            claim_id="claim_1",
-            ground_truth=sample_ground_truth_entry,
-            response=sample_generate_response,
-            recall_at_k=0.5,
-        )
-
-        exporter.export(result)
-        exporter.close()
-
-        lines = output_path.read_text().strip().split("\n")
-        assert len(lines) == 1
-
-        data = json.loads(lines[0])
-        assert data["run_id"] == "test_run"
-        assert data["claim_id"] == "claim_1"
-        assert data["recall_at_k"] == 0.5
-        assert "exported_at" in data
-
-    def test_appends_multiple_results(
-        self, tmp_path, sample_ground_truth_entry, sample_generate_response
-    ):
-        """Should append multiple results to file."""
-        output_path = tmp_path / "results.jsonl"
-        exporter = ResultsExporter(output_path)
-
-        for i in range(3):
-            result = EvaluationResult(
-                run_id="test_run",
-                claim_id=f"claim_{i}",
-                ground_truth=sample_ground_truth_entry,
-                response=sample_generate_response,
-            )
-            exporter.export(result)
-
-        exporter.close()
-
-        lines = output_path.read_text().strip().split("\n")
-        assert len(lines) == 3
 
 
 class TestLoadGroundTruth:

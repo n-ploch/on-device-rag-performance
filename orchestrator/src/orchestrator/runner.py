@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -24,6 +22,7 @@ from pydantic import BaseModel
 from orchestrator.config import EvalConfig
 from orchestrator.datasets import HuggingFaceSciFact
 from orchestrator.datasets.schemas import GroundTruthEntry
+from orchestrator.exporters import JSONLSpanExporter, create_exporter, result_to_span
 from orchestrator.metrics import detect_abstention, mrr, precision_at_k, recall_at_k
 from orchestrator.orchestrator import DatasetNotFoundError, Orchestrator
 from shared_types.schemas import GenerateRequest, GenerateResponse, RunConfig
@@ -42,37 +41,6 @@ class EvaluationResult(BaseModel):
     precision_at_k: float | None = None
     mrr: float | None = None
     is_abstention: bool = False
-
-
-class ResultsExporter:
-    """Export evaluation results to JSONL format."""
-
-    def __init__(self, output_path: Path):
-        """Initialize the exporter.
-
-        Args:
-            output_path: Path to the JSONL output file.
-        """
-        self.output_path = output_path
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = self.output_path.open("a", encoding="utf-8")
-
-    def export(self, result: EvaluationResult) -> None:
-        """Write a single result to the JSONL file.
-
-        Args:
-            result: The evaluation result to export.
-        """
-        payload = result.model_dump()
-        payload["exported_at"] = datetime.now(timezone.utc).isoformat()
-        self._file.write(json.dumps(payload) + "\n")
-        self._file.flush()
-
-    def close(self) -> None:
-        """Close the output file."""
-        if not self._file.closed:
-            self._file.flush()
-            self._file.close()
 
 
 def load_ground_truth(ground_truth_path: Path) -> list[GroundTruthEntry]:
@@ -164,7 +132,7 @@ async def run_evaluation(
     orchestrator: Orchestrator,
     run_config: RunConfig,
     entries: list[GroundTruthEntry],
-    exporter: ResultsExporter,
+    exporter: JSONLSpanExporter,
     show_progress: bool = True,
 ) -> list[EvaluationResult]:
     """Run evaluation for a single run config across all entries.
@@ -173,7 +141,7 @@ async def run_evaluation(
         orchestrator: The orchestrator instance with HTTP client.
         run_config: Run configuration to evaluate.
         entries: List of ground truth entries.
-        exporter: Results exporter for JSONL output.
+        exporter: OTEL span exporter for trace output.
         show_progress: Whether to show progress output.
 
     Returns:
@@ -196,7 +164,19 @@ async def run_evaluation(
                 run_config,
             )
             results.append(result)
-            exporter.export(result)
+
+            # Convert to OTEL span and export
+            span = result_to_span(
+                run_id=result.run_id,
+                claim_id=result.claim_id,
+                ground_truth=result.ground_truth,
+                response=result.response,
+                recall_at_k=result.recall_at_k,
+                precision_at_k=result.precision_at_k,
+                mrr=result.mrr,
+                is_abstention=result.is_abstention,
+            )
+            exporter.export([span])
         except httpx.HTTPStatusError as e:
             logger.error(
                 "HTTP error for claim %s: %s %s",
@@ -244,10 +224,6 @@ async def _run(
             logger.error("No run config found with run_id=%s", run_id_filter)
             return 1
 
-    # Determine output path
-    log_dir = Path(config.paths.log_dir)
-    results_path = log_dir / "results.jsonl"
-
     async with Orchestrator(config) as orchestrator:
         # Ensure dataset is available
         ensure_dataset(orchestrator)
@@ -272,7 +248,7 @@ async def _run(
         logger.info("Loaded %d ground truth entries", len(entries))
 
         # Run evaluations
-        exporter = ResultsExporter(results_path)
+        exporter = create_exporter(config.observability)
         try:
             for run_config in run_configs:
                 logger.info("Starting evaluation: %s", run_config.run_id)
@@ -313,9 +289,9 @@ async def _run(
                     len(results),
                 )
         finally:
-            exporter.close()
+            exporter.shutdown()
 
-    logger.info("Results written to %s", results_path)
+    logger.info("Results written to %s", config.observability.output_jsonl)
     return 0
 
 

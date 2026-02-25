@@ -39,12 +39,6 @@ class ObservabilityConfig(BaseModel):
     output_jsonl: str = "./logs/traces.jsonl"
 
 
-class PathsConfig(BaseModel):
-    """Path configuration for logs and artifacts."""
-
-    log_dir: str = "./logs/"
-
-
 class EvalConfig(BaseModel):
     """Complete evaluation configuration.
 
@@ -53,7 +47,6 @@ class EvalConfig(BaseModel):
 
     dataset: DatasetConfig
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
-    paths: PathsConfig = Field(default_factory=PathsConfig)
     run_configs: list[RunConfig]
 
     @classmethod
