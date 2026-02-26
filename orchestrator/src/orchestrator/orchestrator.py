@@ -20,7 +20,7 @@ import httpx
 from orchestrator.config import EvalConfig
 from orchestrator.models.loader import ModelLoaderError, ensure_models
 from shared_types.dataset_loader import DatasetLoader, get_dataset_dir
-from shared_types.schemas import RunConfig
+from shared_types.schemas import LoadModelsRequest, RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -231,14 +231,17 @@ class Orchestrator:
 
         return paths
 
-    async def check_worker_health(self) -> WorkerHealth:
-        """Check that the worker is healthy and ready.
+    async def check_worker_health(self, require_models: bool = False) -> WorkerHealth:
+        """Check that the worker is healthy.
+
+        Args:
+            require_models: If True, also check that models are loaded.
 
         Returns:
             WorkerHealth with status information.
 
         Raises:
-            WorkerNotReadyError: If worker is not ready.
+            WorkerNotReadyError: If worker is not ready (or models not loaded when required).
             httpx.HTTPError: If connection fails.
         """
         if not self._client:
@@ -254,11 +257,11 @@ class Orchestrator:
             models_loaded=data.get("models_loaded", False),
         )
 
-        if not health.is_ready:
-            raise WorkerNotReadyError(
-                f"Worker is not ready: status={health.status}, "
-                f"models_loaded={health.models_loaded}"
-            )
+        if health.status != "healthy":
+            raise WorkerNotReadyError(f"Worker is not healthy: status={health.status}")
+
+        if require_models and not health.models_loaded:
+            raise WorkerNotReadyError("Worker models not loaded. Call load_worker_models first.")
 
         logger.info(
             "Worker health check passed: status=%s, backend=%s, models_loaded=%s",
@@ -267,6 +270,47 @@ class Orchestrator:
             health.models_loaded,
         )
         return health
+
+    async def load_worker_models(self, run_config: RunConfig) -> None:
+        """Load models on the worker based on RunConfig.
+
+        Calls the worker's /load_models endpoint to load the embedder and
+        generator models specified in the run configuration.
+
+        Args:
+            run_config: The run configuration specifying which models to load.
+
+        Raises:
+            RuntimeError: If not in async context.
+            httpx.HTTPError: If worker communication fails.
+        """
+        if not self._client:
+            raise RuntimeError("Orchestrator must be used as async context manager")
+
+        request = LoadModelsRequest(
+            embedder_repo=run_config.retrieval.model,
+            embedder_quantization=run_config.retrieval.quantization,
+            generator_repo=run_config.generation.model,
+            generator_quantization=run_config.generation.quantization,
+        )
+
+        logger.info(
+            "Loading models on worker: embedder=%s/%s, generator=%s/%s",
+            request.embedder_repo,
+            request.embedder_quantization,
+            request.generator_repo,
+            request.generator_quantization,
+        )
+
+        response = await self._client.post(
+            "/load_models",
+            json=request.model_dump(),
+            timeout=httpx.Timeout(300.0),  # Model loading can take time
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        logger.info("Worker models loaded: %s", data.get("message", "success"))
 
     async def check_collection_status(
         self,
@@ -412,16 +456,23 @@ class Orchestrator:
         """
         logger.info("Validating prerequisites...")
 
-        # 0. Ensure models are available
+        # 0. Ensure models are available locally
         self._ensure_models()
 
         # 1. Check dataset
         self.validate_dataset()
 
-        # 2. Check worker
-        await self.check_worker_health()
+        # 2. Check worker is running
+        await self.check_worker_health(require_models=False)
 
-        # 3. Ensure collections (will build if missing)
+        # 3. Load models on worker (using first run config)
+        first_config = self.config.run_configs[0]
+        await self.load_worker_models(first_config)
+
+        # 4. Verify models are loaded
+        await self.check_worker_health(require_models=True)
+
+        # 5. Ensure collections (will build if missing)
         await self.ensure_collections()
 
         logger.info("All prerequisites validated successfully")

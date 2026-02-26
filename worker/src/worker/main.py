@@ -16,6 +16,8 @@ from worker.logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
+from fastapi import HTTPException
+
 from shared_types.schemas import (
     CollectionBuildRequest,
     CollectionBuildResponse,
@@ -24,6 +26,8 @@ from shared_types.schemas import (
     GenerateRequest,
     GenerateResponse,
     InferenceMeasurement,
+    LoadModelsRequest,
+    LoadModelsResponse,
     RetrievalData,
 )
 from worker.models.embedder import Embedder
@@ -44,49 +48,123 @@ def _is_missing_collection_error(exc: Exception) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load models at startup, release on shutdown.
+    """Initialize worker state. Models are loaded via /load_models endpoint.
 
-    llama.cpp locks memory upon instantiation, so we create both the
-    embedder and generator wrappers here and store them in app.state.
+    llama.cpp locks memory upon instantiation, so models are loaded on-demand
+    via the /load_models endpoint rather than at startup.
     """
-    embedder_repo = os.environ.get("EMBEDDER_MODEL_REPO", "mistral-embed")
-    embedder_quant = os.environ.get("EMBEDDER_QUANTIZATION", "q4_k_m")
-    generator_repo = os.environ.get("GENERATOR_MODEL_REPO", "mistral-7b-instruct")
-    generator_quant = os.environ.get("GENERATOR_QUANTIZATION", "q4_k_m")
+    # Initialize state - models will be loaded via /load_models
+    app.state.embedder = None
+    app.state.generator = None
+    app.state.loaded_models = None
 
-    logger.info("Loading embedder: %s (%s)", embedder_repo, embedder_quant)
-    embedder_path = get_model_path(embedder_repo, embedder_quant)
-    app.state.embedder = Embedder(embedder_path, n_ctx=512)
-
-    logger.info("Loading generator: %s (%s)", generator_repo, generator_quant)
-    generator_path = get_model_path(generator_repo, generator_quant)
-    app.state.generator = Generator(generator_path, n_ctx=2048)
-
+    # Initialize collections directory
     collections_dir = Path(os.environ.get("LOCAL_COLLECTIONS_DIR", "./collections"))
     app.state.collections_dir = collections_dir
-    app.state.retrieval_service = RetrievalService(
-        embedder=app.state.embedder,
-        collections_dir=collections_dir,
-    )
-    app.state.embedding_service = EmbeddingService(
-        embedder=app.state.embedder,
-        collections_dir=collections_dir,
-    )
-    app.state.generation_service = GenerationService(generator=app.state.generator)
 
-    logger.info("Models loaded, worker ready")
+    # Services will be initialized when models are loaded
+    app.state.retrieval_service = None
+    app.state.embedding_service = None
+    app.state.generation_service = None
+
+    logger.info("Worker initialized, waiting for /load_models call")
     yield
 
-    del app.state.generator
-    del app.state.embedder
+    # Cleanup models if loaded
+    if app.state.generator is not None:
+        del app.state.generator
+    if app.state.embedder is not None:
+        del app.state.embedder
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="RAG Worker", lifespan=lifespan)
 
+    @app.post("/load_models", response_model=LoadModelsResponse)
+    async def load_models(request: LoadModelsRequest, req: Request) -> LoadModelsResponse:
+        """Load embedder and generator models.
+
+        If models are already loaded, they are freed first before loading new ones.
+        """
+        logger.info(
+            "POST /load_models embedder=%s/%s, generator=%s/%s",
+            request.embedder_repo,
+            request.embedder_quantization,
+            request.generator_repo,
+            request.generator_quantization,
+        )
+
+        # Free old models if loaded
+        if req.app.state.embedder is not None:
+            logger.info("Freeing previous embedder")
+            del req.app.state.embedder
+            req.app.state.embedder = None
+        if req.app.state.generator is not None:
+            logger.info("Freeing previous generator")
+            del req.app.state.generator
+            req.app.state.generator = None
+
+        # Load new embedder
+        logger.info("Loading embedder: %s (%s)", request.embedder_repo, request.embedder_quantization)
+        embedder_path = get_model_path(request.embedder_repo, request.embedder_quantization)
+        req.app.state.embedder = Embedder(embedder_path, n_ctx=512)
+
+        # Load new generator
+        logger.info("Loading generator: %s (%s)", request.generator_repo, request.generator_quantization)
+        generator_path = get_model_path(request.generator_repo, request.generator_quantization)
+        req.app.state.generator = Generator(generator_path, n_ctx=2048)
+
+        # Track what's loaded for validation
+        req.app.state.loaded_models = {
+            "embedder": (request.embedder_repo, request.embedder_quantization),
+            "generator": (request.generator_repo, request.generator_quantization),
+        }
+
+        # Initialize services with new models
+        collections_dir = req.app.state.collections_dir
+        req.app.state.retrieval_service = RetrievalService(
+            embedder=req.app.state.embedder,
+            collections_dir=collections_dir,
+        )
+        req.app.state.embedding_service = EmbeddingService(
+            embedder=req.app.state.embedder,
+            collections_dir=collections_dir,
+        )
+        req.app.state.generation_service = GenerationService(generator=req.app.state.generator)
+
+        logger.info("Models loaded successfully")
+        return LoadModelsResponse(
+            embedder=f"{request.embedder_repo}/{request.embedder_quantization}",
+            generator=f"{request.generator_repo}/{request.generator_quantization}",
+            message="Models loaded successfully",
+        )
+
     @app.post("/generate", response_model=GenerateResponse)
     async def generate(request: GenerateRequest, req: Request) -> GenerateResponse:
         logger.info("POST /generate run_id=%s", request.run_config.run_id)
+
+        # Validate models are loaded
+        if req.app.state.embedder is None or req.app.state.generator is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Models not loaded. Call /load_models first.",
+            )
+
+        # Validate loaded models match request
+        loaded = req.app.state.loaded_models
+        expected_embedder = (request.run_config.retrieval.model, request.run_config.retrieval.quantization)
+        if expected_embedder != loaded["embedder"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"RunConfig expects embedder {expected_embedder}, but {loaded['embedder']} is loaded",
+            )
+        expected_generator = (request.run_config.generation.model, request.run_config.generation.quantization)
+        if expected_generator != loaded["generator"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"RunConfig expects generator {expected_generator}, but {loaded['generator']} is loaded",
+            )
+
         logger.debug(
             "Retrieval config: k=%d, model=%s",
             request.run_config.retrieval.k,
@@ -143,11 +221,15 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health(req: Request) -> dict:
-        models_loaded = hasattr(req.app.state, "embedder") and hasattr(req.app.state, "generator")
+        models_loaded = (
+            req.app.state.embedder is not None
+            and req.app.state.generator is not None
+        )
         return {
-            "status": "healthy" if models_loaded else "initializing",
+            "status": "healthy",
             "backend": detect_backend(),
             "models_loaded": models_loaded,
+            "loaded_models": req.app.state.loaded_models,
         }
 
     @app.post("/collection/status", response_model=CollectionStatusResponse)

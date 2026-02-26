@@ -152,3 +152,23 @@ class CollectionBuildResponse(BaseModel):
     collection_name: str
     chunks_embedded: int
     already_existed: bool
+
+
+# Model management schemas (orchestrator <-> worker)
+
+
+class LoadModelsRequest(BaseModel):
+    """Request to load models on worker."""
+
+    embedder_repo: str
+    embedder_quantization: str
+    generator_repo: str
+    generator_quantization: str
+
+
+class LoadModelsResponse(BaseModel):
+    """Response after loading models."""
+
+    embedder: str
+    generator: str
+    message: str
