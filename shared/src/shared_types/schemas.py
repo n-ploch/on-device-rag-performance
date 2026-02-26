@@ -157,13 +157,28 @@ class CollectionBuildResponse(BaseModel):
 # Model management schemas (orchestrator <-> worker)
 
 
+class ServerConfig(BaseModel):
+    """Optional server configuration for llama-server instances."""
+
+    n_ctx: int | None = None  # Context size (embedding: 512, generation: 2048)
+    n_gpu_layers: int = -1  # GPU layers to offload (-1 = all)
+    parallel_slots: int = 4  # Parallel request slots (generation only)
+    pooling: str = "mean"  # Pooling strategy (embedding only): mean, cls, last
+
+
 class LoadModelsRequest(BaseModel):
-    """Request to load models on worker."""
+    """Request to load models on worker.
+
+    Models are loaded by starting llama-server processes. The server_config
+    allows customizing server parameters if needed.
+    """
 
     embedder_repo: str
     embedder_quantization: str
     generator_repo: str
     generator_quantization: str
+    embedder_config: ServerConfig | None = None  # Optional embedding server config
+    generator_config: ServerConfig | None = None  # Optional generation server config
 
 
 class LoadModelsResponse(BaseModel):
@@ -172,3 +187,14 @@ class LoadModelsResponse(BaseModel):
     embedder: str
     generator: str
     message: str
+
+
+class ServerMetrics(BaseModel):
+    """Metrics from a llama-server instance."""
+
+    prompt_tokens_total: int = 0
+    tokens_predicted_total: int = 0
+    prompt_seconds_total: float = 0.0
+    tokens_predicted_seconds_total: float = 0.0
+    n_decode_total: int = 0
+    requests_processing: int = 0
