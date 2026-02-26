@@ -1,20 +1,52 @@
-"""Generation service using llama.cpp for RAG answer generation."""
+"""Generation service for RAG answer generation."""
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol, Union
 
 if TYPE_CHECKING:
-    from worker.models.generator import Generator, GenerationResult
+    from worker.models.generator import Generator as InProcessGenerator
+    from worker.models.generator_http import LlamaServerGenerator
+
+
+@dataclass
+class GenerationResult:
+    """Result from text generation (matches both generator implementations)."""
+
+    text: str
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class GeneratorProtocol(Protocol):
+    """Protocol defining the generator interface."""
+
+    def generate(
+        self,
+        prompt: str,
+        max_tokens: int = ...,
+        temperature: float = ...,
+        top_p: float = ...,
+        stop: list[str] | None = ...,
+    ) -> GenerationResult: ...
+
+
+# Type alias for generator implementations
+GeneratorType = Union["InProcessGenerator", "LlamaServerGenerator"]
 
 logger = logging.getLogger(__name__)
 
 
 class GenerationService:
-    """Runs RAG-style answer generation using the configured LLM."""
+    """Runs RAG-style answer generation using the configured LLM.
 
-    def __init__(self, generator: Generator):
+    Supports both in-process generators (llama-cpp-python) and HTTP-based
+    generators (llama-server) through duck typing.
+    """
+
+    def __init__(self, generator: GeneratorType):
         self._generator = generator
 
     def generate(
@@ -22,7 +54,7 @@ class GenerationService:
         prompt: str,
         retrieval_chunks: list[dict] | None = None,
         max_tokens: int = 256,
-    ) -> "GenerationResult":
+    ) -> GenerationResult:
         """Generate an answer using retrieved context.
 
         Args:
