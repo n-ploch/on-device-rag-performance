@@ -1,4 +1,4 @@
-"""Worker FastAPI application."""
+"""Worker FastAPI application using llama-server for inference."""
 
 from __future__ import annotations
 
@@ -9,14 +9,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import chromadb
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 
 from worker.logging_config import setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
-
-from fastapi import HTTPException
 
 from shared_types.schemas import (
     CollectionBuildRequest,
@@ -30,15 +28,19 @@ from shared_types.schemas import (
     LoadModelsResponse,
     RetrievalData,
 )
-from worker.models.embedder import Embedder
-from worker.models.generator import Generator
-from worker.models.llm import detect_backend
-from worker.models.registry import get_model_path
 from worker.datasets.corpus_reader import CorpusReader
+from worker.models.embedder_http import LlamaServerEmbedder
+from worker.models.generator_http import LlamaServerGenerator
+from worker.models.registry import get_model_path
 from worker.services.embedding import EmbeddingService
 from worker.services.generation import GenerationService
 from worker.services.hardware_monitor import HardwareMonitor
 from worker.services.retrieval import RetrievalService
+from worker.services.server_manager import (
+    DEFAULT_EMBEDDING_PORT,
+    DEFAULT_GENERATION_PORT,
+    LlamaServerManager,
+)
 
 
 def _is_missing_collection_error(exc: Exception) -> bool:
@@ -50,9 +52,20 @@ def _is_missing_collection_error(exc: Exception) -> bool:
 async def lifespan(app: FastAPI):
     """Initialize worker state. Models are loaded via /load_models endpoint.
 
-    llama.cpp locks memory upon instantiation, so models are loaded on-demand
-    via the /load_models endpoint rather than at startup.
+    The worker manages llama-server processes for both embedding and generation.
+    Servers are started/stopped via the /load_models endpoint.
     """
+    # Initialize server manager
+    llama_server_path = os.environ.get("LLAMA_SERVER_PATH")
+    embedding_port = int(os.environ.get("EMBEDDING_PORT", str(DEFAULT_EMBEDDING_PORT)))
+    generation_port = int(os.environ.get("GENERATION_PORT", str(DEFAULT_GENERATION_PORT)))
+
+    app.state.server_manager = LlamaServerManager(
+        llama_server_path=llama_server_path,
+        embedding_port=embedding_port,
+        generation_port=generation_port,
+    )
+
     # Initialize state - models will be loaded via /load_models
     app.state.embedder = None
     app.state.generator = None
@@ -67,24 +80,28 @@ async def lifespan(app: FastAPI):
     app.state.embedding_service = None
     app.state.generation_service = None
 
-    logger.info("Worker initialized, waiting for /load_models call")
+    logger.info(
+        "Worker initialized with llama-server backend, waiting for /load_models call "
+        "(embedding port: %d, generation port: %d)",
+        embedding_port,
+        generation_port,
+    )
     yield
 
-    # Cleanup models if loaded
-    if app.state.generator is not None:
-        del app.state.generator
-    if app.state.embedder is not None:
-        del app.state.embedder
+    # Cleanup: stop all servers
+    logger.info("Shutting down, stopping llama-server instances")
+    await app.state.server_manager.close()
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="RAG Worker", lifespan=lifespan)
+    app = FastAPI(title="RAG Worker (llama-server)", lifespan=lifespan)
 
     @app.post("/load_models", response_model=LoadModelsResponse)
     async def load_models(request: LoadModelsRequest, req: Request) -> LoadModelsResponse:
-        """Load embedder and generator models.
+        """Load embedder and generator models by starting llama-server processes.
 
-        If models are already loaded, they are freed first before loading new ones.
+        If servers are already running, they are stopped first before starting
+        new ones with the requested models.
         """
         logger.info(
             "POST /load_models embedder=%s/%s, generator=%s/%s",
@@ -94,25 +111,59 @@ def create_app() -> FastAPI:
             request.generator_quantization,
         )
 
-        # Free old models if loaded
+        server_manager: LlamaServerManager = req.app.state.server_manager
+
+        # Stop existing servers and cleanup clients
         if req.app.state.embedder is not None:
-            logger.info("Freeing previous embedder")
-            del req.app.state.embedder
+            logger.info("Cleaning up previous embedder client")
+            req.app.state.embedder.close()
             req.app.state.embedder = None
         if req.app.state.generator is not None:
-            logger.info("Freeing previous generator")
-            del req.app.state.generator
+            logger.info("Cleaning up previous generator client")
+            req.app.state.generator.close()
             req.app.state.generator = None
 
-        # Load new embedder
-        logger.info("Loading embedder: %s (%s)", request.embedder_repo, request.embedder_quantization)
+        # Get model paths
         embedder_path = get_model_path(request.embedder_repo, request.embedder_quantization)
-        req.app.state.embedder = Embedder(embedder_path, n_ctx=512)
-
-        # Load new generator
-        logger.info("Loading generator: %s (%s)", request.generator_repo, request.generator_quantization)
         generator_path = get_model_path(request.generator_repo, request.generator_quantization)
-        req.app.state.generator = Generator(generator_path, n_ctx=2048)
+
+        # Start embedding server with optional custom config
+        embedder_cfg = request.embedder_config
+        logger.info("Starting embedding server: %s (%s)", request.embedder_repo, request.embedder_quantization)
+        if not await server_manager.start_embedding_server(
+            model_path=embedder_path,
+            n_ctx=embedder_cfg.n_ctx if embedder_cfg and embedder_cfg.n_ctx else 512,
+            n_gpu_layers=embedder_cfg.n_gpu_layers if embedder_cfg else -1,
+            pooling=embedder_cfg.pooling if embedder_cfg else "mean",
+        ):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to start embedding server for {request.embedder_repo}",
+            )
+
+        # Start generation server with optional custom config
+        generator_cfg = request.generator_config
+        logger.info("Starting generation server: %s (%s)", request.generator_repo, request.generator_quantization)
+        if not await server_manager.start_generation_server(
+            model_path=generator_path,
+            n_ctx=generator_cfg.n_ctx if generator_cfg and generator_cfg.n_ctx else 2048,
+            n_gpu_layers=generator_cfg.n_gpu_layers if generator_cfg else -1,
+            parallel_slots=generator_cfg.parallel_slots if generator_cfg else 4,
+        ):
+            # Stop embedding server if generation server fails
+            await server_manager.stop_embedding_server()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to start generation server for {request.generator_repo}",
+            )
+
+        # Create HTTP clients
+        req.app.state.embedder = LlamaServerEmbedder(
+            server_url=server_manager.embedding_url,
+        )
+        req.app.state.generator = LlamaServerGenerator(
+            server_url=server_manager.generation_url,
+        )
 
         # Track what's loaded for validation
         req.app.state.loaded_models = {
@@ -120,7 +171,7 @@ def create_app() -> FastAPI:
             "generator": (request.generator_repo, request.generator_quantization),
         }
 
-        # Initialize services with new models
+        # Initialize services with new clients
         collections_dir = req.app.state.collections_dir
         req.app.state.retrieval_service = RetrievalService(
             embedder=req.app.state.embedder,
@@ -130,13 +181,15 @@ def create_app() -> FastAPI:
             embedder=req.app.state.embedder,
             collections_dir=collections_dir,
         )
-        req.app.state.generation_service = GenerationService(generator=req.app.state.generator)
+        req.app.state.generation_service = GenerationService(
+            generator=req.app.state.generator,
+        )
 
-        logger.info("Models loaded successfully")
+        logger.info("Models loaded successfully via llama-server")
         return LoadModelsResponse(
             embedder=f"{request.embedder_repo}/{request.embedder_quantization}",
             generator=f"{request.generator_repo}/{request.generator_quantization}",
-            message="Models loaded successfully",
+            message="Models loaded successfully via llama-server",
         )
 
     @app.post("/generate", response_model=GenerateResponse)
@@ -221,15 +274,66 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health(req: Request) -> dict:
+        server_manager: LlamaServerManager = req.app.state.server_manager
+
+        # Check server health
+        server_health = await server_manager.health_check()
+
         models_loaded = (
             req.app.state.embedder is not None
             and req.app.state.generator is not None
         )
+
         return {
             "status": "healthy",
-            "backend": detect_backend(),
+            "backend": "llama-server",
             "models_loaded": models_loaded,
             "loaded_models": req.app.state.loaded_models,
+            "servers": {
+                "embedding": {
+                    "running": server_manager.is_embedding_running,
+                    "healthy": server_health.get("embedding", False),
+                    "url": server_manager.embedding_url,
+                },
+                "generation": {
+                    "running": server_manager.is_generation_running,
+                    "healthy": server_health.get("generation", False),
+                    "url": server_manager.generation_url,
+                },
+            },
+        }
+
+    @app.get("/metrics")
+    async def metrics(req: Request) -> dict:
+        """Scrape and return metrics from llama-server instances."""
+        server_manager: LlamaServerManager = req.app.state.server_manager
+        server_metrics = await server_manager.scrape_metrics()
+
+        return {
+            "embedding": (
+                {
+                    "prompt_tokens_total": server_metrics["embedding"].prompt_tokens_total,
+                    "tokens_predicted_total": server_metrics["embedding"].tokens_predicted_total,
+                    "prompt_seconds_total": server_metrics["embedding"].prompt_seconds_total,
+                    "tokens_predicted_seconds_total": server_metrics["embedding"].tokens_predicted_seconds_total,
+                    "n_decode_total": server_metrics["embedding"].n_decode_total,
+                    "requests_processing": server_metrics["embedding"].requests_processing,
+                }
+                if "embedding" in server_metrics
+                else None
+            ),
+            "generation": (
+                {
+                    "prompt_tokens_total": server_metrics["generation"].prompt_tokens_total,
+                    "tokens_predicted_total": server_metrics["generation"].tokens_predicted_total,
+                    "prompt_seconds_total": server_metrics["generation"].prompt_seconds_total,
+                    "tokens_predicted_seconds_total": server_metrics["generation"].tokens_predicted_seconds_total,
+                    "n_decode_total": server_metrics["generation"].n_decode_total,
+                    "requests_processing": server_metrics["generation"].requests_processing,
+                }
+                if "generation" in server_metrics
+                else None
+            ),
         }
 
     @app.post("/collection/status", response_model=CollectionStatusResponse)
@@ -243,6 +347,13 @@ def create_app() -> FastAPI:
             request.dataset_id,
             request.retrieval_config.model,
         )
+
+        if req.app.state.embedding_service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Models not loaded. Call /load_models first.",
+            )
+
         embedding_service: EmbeddingService = req.app.state.embedding_service
 
         exists = embedding_service.collection_exists(
@@ -286,6 +397,13 @@ def create_app() -> FastAPI:
             request.dataset_id,
             request.retrieval_config.model,
         )
+
+        if req.app.state.embedding_service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Models not loaded. Call /load_models first.",
+            )
+
         embedding_service: EmbeddingService = req.app.state.embedding_service
 
         # Load corpus from dataset
