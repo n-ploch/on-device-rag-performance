@@ -29,7 +29,7 @@ from pydantic import BaseModel
 from orchestrator.config import EvalConfig
 from orchestrator.datasets import HuggingFaceRAGBench, HuggingFaceSciFact
 from orchestrator.datasets.schemas import GroundTruthEntry
-from orchestrator.exporters import JSONLSpanExporter,LangfuseExporter, create_exporter, result_to_span
+from orchestrator.exporters import JSONLSpanExporter, LangfuseExporter, create_exporter, result_to_spans
 from orchestrator.metrics import detect_abstention, mrr, precision_at_k, recall_at_k
 from orchestrator.orchestrator import DatasetNotFoundError, Orchestrator
 from shared_types.schemas import GenerateRequest, GenerateResponse, RunConfig
@@ -229,8 +229,8 @@ async def run_evaluation(
             )
             results.append(result)
 
-            # Convert to OTEL span and export
-            span = result_to_span(
+            # Convert to OTEL spans (trace + retrieval + generation) and export
+            spans = result_to_spans(
                 run_id=result.run_id,
                 claim_id=result.claim_id,
                 ground_truth=result.ground_truth,
@@ -240,7 +240,7 @@ async def run_evaluation(
                 mrr=result.mrr,
                 is_abstention=result.is_abstention,
             )
-            exporter.export([span])
+            exporter.export(spans)
         except httpx.HTTPStatusError as e:
             logger.error(
                 "HTTP error for claim %s: %s %s",
