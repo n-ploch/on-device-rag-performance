@@ -246,7 +246,7 @@ def create_app() -> FastAPI:
         duration_seconds = max(llm_generation_latency_ms / 1000.0, 1e-6)
 
         retrieval_data = RetrievalData(
-            cited_doc_ids=[item["id"] for item in retrieved],
+            cited_doc_ids=[item["metadata"].get("doc_id", item["id"]) for item in retrieved],
             retrieved_chunks=[item["text"] for item in retrieved],
         )
         inference_measurement = InferenceMeasurement(
