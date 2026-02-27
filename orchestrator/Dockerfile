@@ -11,4 +11,4 @@ COPY orchestrator/ /app/
 RUN pip install -e .
 
 # Default command
-CMD ["python", "-m", "orchestrator.runner"]
+CMD ["python", "-m", "orchestrator.runner", "--config", "config/config.yaml"]
