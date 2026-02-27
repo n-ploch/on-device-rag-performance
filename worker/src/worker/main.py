@@ -235,15 +235,12 @@ def create_app() -> FastAPI:
             )
             retrieval_latency_ms = (time.perf_counter() - retrieval_start) * 1000
 
-            generation_start = time.perf_counter()
             gen_result = generation_service.generate(
                 prompt=request.input_prompt,
                 retrieval_chunks=retrieved,
             )
-            llm_generation_latency_ms = (time.perf_counter() - generation_start) * 1000
 
         e2e_latency_ms = (time.perf_counter() - e2e_start) * 1000
-        duration_seconds = max(llm_generation_latency_ms / 1000.0, 1e-6)
 
         retrieval_data = RetrievalData(
             cited_doc_ids=[item["metadata"].get("doc_id", item["id"]) for item in retrieved],
@@ -252,17 +249,17 @@ def create_app() -> FastAPI:
         inference_measurement = InferenceMeasurement(
             e2e_latency_ms=e2e_latency_ms,
             retrieval_latency_ms=retrieval_latency_ms,
-            ttft_ms=retrieval_latency_ms,
-            llm_generation_latency_ms=llm_generation_latency_ms,
+            ttft_ms=gen_result.prompt_ms + gen_result.predicted_per_token_ms,
+            llm_generation_latency_ms=gen_result.predicted_ms,
             prompt_tokens=gen_result.prompt_tokens,
             completion_tokens=gen_result.completion_tokens,
-            tokens_per_second=gen_result.completion_tokens / duration_seconds,
+            tokens_per_second=gen_result.predicted_per_second,
         )
 
         logger.info(
             "Request complete: retrieval=%.1fms, generation=%.1fms, total=%.1fms",
             retrieval_latency_ms,
-            llm_generation_latency_ms,
+            gen_result.predicted_ms,
             e2e_latency_ms,
         )
         return GenerateResponse(
