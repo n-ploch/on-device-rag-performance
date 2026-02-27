@@ -91,13 +91,20 @@ class HardwareMonitor:
         cpu_pct = float(psutil.cpu_percent())
         self._cpu_samples_pct.append(cpu_pct)
 
-        temps = psutil.sensors_temperatures() or {}
-        current_temps: list[float] = []
-        for entries in temps.values():
-            for entry in entries:
-                value = getattr(entry, "current", None)
-                if value is not None:
-                    current_temps.append(float(value))
+        # Temperature monitoring is only available on Linux
+        # psutil.sensors_temperatures() does not exist on macOS/Windows
+        if hasattr(psutil, "sensors_temperatures"):
+            try:
+                temps = psutil.sensors_temperatures() or {}
+                current_temps: list[float] = []
+                for entries in temps.values():
+                    for entry in entries:
+                        value = getattr(entry, "current", None)
+                        if value is not None:
+                            current_temps.append(float(value))
 
-        if current_temps:
-            self._temp_samples_c.append(max(current_temps))
+                if current_temps:
+                    self._temp_samples_c.append(max(current_temps))
+            except Exception as e:
+                # Some systems may have the method but fail to read sensors
+                logger.debug("Could not read temperature sensors: %s", e)
