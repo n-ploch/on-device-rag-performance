@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   orchestrator:
     build:
@@ -10,8 +8,13 @@ services:
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
       - LOCAL_MODELS_DIR=/models
+      - LOCAL_COLLECTIONS_DIR=/collections
+      - LOCAL_DATASETS_DIR=/datasets
     volumes:
       - ../config:/app/config:ro
       - ./logs:/app/logs
+      - ${LOCAL_MODELS_DIR:-../local/models}:/models:ro
+      - ${LOCAL_COLLECTIONS_DIR:-../local/collections}:/collections
+      - ${LOCAL_DATASETS_DIR:-../local/datasets}:/datasets:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
