@@ -17,6 +17,11 @@ class GenerationResult:
     text: str
     prompt_tokens: int
     completion_tokens: int
+    # Server-side timing (from llama.cpp timings)
+    prompt_ms: float = 0.0
+    predicted_ms: float = 0.0
+    predicted_per_token_ms: float = 0.0
+    predicted_per_second: float = 0.0
 
 
 class LlamaServerGenerator:
@@ -92,11 +97,16 @@ class LlamaServerGenerator:
 
         text = data["choices"][0]["text"]
         usage = data.get("usage", {})
+        timings = data.get("timings", {})
 
         return GenerationResult(
             text=text.strip(),
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
+            prompt_ms=timings.get("prompt_ms", 0.0),
+            predicted_ms=timings.get("predicted_ms", 0.0),
+            predicted_per_token_ms=timings.get("predicted_per_token_ms", 0.0),
+            predicted_per_second=timings.get("predicted_per_second", 0.0),
         )
 
     def generate_chat(
@@ -154,11 +164,16 @@ class LlamaServerGenerator:
 
         text = data["choices"][0]["message"]["content"]
         usage = data.get("usage", {})
+        timings = data.get("timings", {})
 
         return GenerationResult(
             text=text.strip(),
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
+            prompt_ms=timings.get("prompt_ms", 0.0),
+            predicted_ms=timings.get("predicted_ms", 0.0),
+            predicted_per_token_ms=timings.get("predicted_per_token_ms", 0.0),
+            predicted_per_second=timings.get("predicted_per_second", 0.0),
         )
 
     @property
