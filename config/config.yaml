@@ -2,7 +2,7 @@
 # See README.md for full documentation
 
 dataset:
-  id: "ragbench_emanual"
+  id: &dataset_id "ragbench_emanual"
   name: "ragbench"
   limits:
     corpus: null
@@ -17,6 +17,7 @@ observability:
 run_configs:
   - run_id: "mistral_q4_baseline_001"
     retrieval:
+      dataset_id: *dataset_id
       model: "keisuke-miyako/multilingual-e5-small-gguf-q4_k_m"
       quantization: "q4_k_m"
       dimensions: 384

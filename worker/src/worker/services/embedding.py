@@ -93,7 +93,6 @@ class EmbeddingService:
     def embed_corpus(
         self,
         corpus: list[CorpusDocument],
-        dataset_id: str,
         retrieval_config: RetrievalConfig,
         batch_size: int = DEFAULT_BATCH_SIZE,
         progress_callback: Callable[[EmbeddingProgress], None] | None = None,
@@ -102,14 +101,14 @@ class EmbeddingService:
 
         Args:
             corpus: List of documents with id and text fields.
-            dataset_id: Identifier for the dataset (e.g., "scifact").
-            retrieval_config: Configuration including model, chunking, etc.
+            retrieval_config: Configuration including dataset_id, model, chunking, etc.
             batch_size: Number of chunks to embed per batch.
             progress_callback: Optional callback for progress updates.
 
         Returns:
             EmbeddingResult with collection info and statistics.
         """
+        dataset_id = retrieval_config.dataset_id
         collection_path = self._registry.get_or_create_collection(dataset_id, retrieval_config)
         collection_name = collection_path.name
 
@@ -166,18 +165,17 @@ class EmbeddingService:
 
     def collection_exists(
         self,
-        dataset_id: str,
         retrieval_config: RetrievalConfig,
     ) -> bool:
         """Check if a populated collection already exists for this config.
 
         Args:
-            dataset_id: Dataset identifier.
-            retrieval_config: Retrieval configuration.
+            retrieval_config: Retrieval configuration (includes dataset_id).
 
         Returns:
             True if collection exists and has documents, False otherwise.
         """
+        dataset_id = retrieval_config.dataset_id
         collection_path = self._registry.resolve_collection_path(dataset_id, retrieval_config)
         if collection_path is None:
             return False
@@ -194,11 +192,12 @@ class EmbeddingService:
 
     def resolve_collection_path(
         self,
-        dataset_id: str,
         retrieval_config: RetrievalConfig,
     ) -> Path | None:
         """Resolve collection folder path for exact dataset/config match."""
-        return self._registry.resolve_collection_path(dataset_id, retrieval_config)
+        return self._registry.resolve_collection_path(
+            retrieval_config.dataset_id, retrieval_config
+        )
 
     def _chunk_documents(
         self,

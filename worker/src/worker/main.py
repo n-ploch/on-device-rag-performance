@@ -342,10 +342,11 @@ def create_app() -> FastAPI:
         req: Request,
     ) -> CollectionStatusResponse:
         """Check if a collection exists and is populated."""
+        retrieval_config = request.retrieval_config
         logger.info(
             "POST /collection/status dataset=%s, model=%s",
-            request.dataset_id,
-            request.retrieval_config.model,
+            retrieval_config.dataset_id,
+            retrieval_config.model,
         )
 
         if req.app.state.embedding_service is None:
@@ -356,17 +357,11 @@ def create_app() -> FastAPI:
 
         embedding_service: EmbeddingService = req.app.state.embedding_service
 
-        exists = embedding_service.collection_exists(
-            dataset_id=request.dataset_id,
-            retrieval_config=request.retrieval_config,
-        )
+        exists = embedding_service.collection_exists(retrieval_config)
 
         # Get chunk count if collection exists
         chunk_count = None
-        resolved_path = embedding_service.resolve_collection_path(
-            request.dataset_id,
-            request.retrieval_config,
-        )
+        resolved_path = embedding_service.resolve_collection_path(retrieval_config)
         collection_name = resolved_path.name if resolved_path is not None else None
         if exists and resolved_path is not None:
             client = chromadb.PersistentClient(path=str(resolved_path))
@@ -392,10 +387,11 @@ def create_app() -> FastAPI:
         req: Request,
     ) -> CollectionBuildResponse:
         """Build a collection by embedding the corpus."""
+        retrieval_config = request.retrieval_config
         logger.info(
             "POST /collection/build dataset=%s, model=%s",
-            request.dataset_id,
-            request.retrieval_config.model,
+            retrieval_config.dataset_id,
+            retrieval_config.model,
         )
 
         if req.app.state.embedding_service is None:
@@ -407,7 +403,7 @@ def create_app() -> FastAPI:
         embedding_service: EmbeddingService = req.app.state.embedding_service
 
         # Load corpus from dataset
-        corpus_reader = CorpusReader.from_dataset_id(request.dataset_id)
+        corpus_reader = CorpusReader.from_dataset_id(retrieval_config.dataset_id)
         corpus = corpus_reader.read_all()
 
         logger.info("Loaded %d documents from corpus", len(corpus))
@@ -415,8 +411,7 @@ def create_app() -> FastAPI:
         # Build the collection
         result = embedding_service.embed_corpus(
             corpus=corpus,
-            dataset_id=request.dataset_id,
-            retrieval_config=request.retrieval_config,
+            retrieval_config=retrieval_config,
         )
 
         logger.info(

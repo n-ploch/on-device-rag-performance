@@ -34,6 +34,7 @@ class ChunkingConfig(BaseModel):
 class RetrievalConfig(BaseModel):
     """Retrieval model and ANN/query parameters."""
 
+    dataset_id: str  # Dataset identifier (e.g., "scifact", "ragbench_emanual")
     model: str
     quantization: str
     dimensions: int = Field(gt=0)
@@ -124,9 +125,11 @@ class CorpusDocument(BaseModel):
 
 
 class CollectionStatusRequest(BaseModel):
-    """Request to check collection status."""
+    """Request to check collection status.
 
-    dataset_id: str
+    The dataset_id is included in retrieval_config.dataset_id.
+    """
+
     retrieval_config: RetrievalConfig
 
 
@@ -140,9 +143,11 @@ class CollectionStatusResponse(BaseModel):
 
 
 class CollectionBuildRequest(BaseModel):
-    """Request to build a collection."""
+    """Request to build a collection.
 
-    dataset_id: str
+    The dataset_id is included in retrieval_config.dataset_id.
+    """
+
     retrieval_config: RetrievalConfig
 
 

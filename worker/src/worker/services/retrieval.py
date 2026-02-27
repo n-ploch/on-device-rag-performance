@@ -28,10 +28,8 @@ class RetrievalService:
         self,
         embedder: Embedder,
         collections_dir: Path | None = None,
-        dataset_id: str = "scifact",
     ):
         self._embedder = embedder
-        self._dataset_id = dataset_id
         self._embedding_fn = LlamaEmbeddingFunction(embedder)
 
         if collections_dir is None:
@@ -42,12 +40,16 @@ class RetrievalService:
         self._collection_cache: dict[str, chromadb.Collection] = {}
 
     def _get_collection(self, retrieval_config: RetrievalConfig) -> chromadb.Collection:
-        """Get or cache a ChromaDB collection for the given config."""
-        collection_path = self._registry.resolve_collection_path(self._dataset_id, retrieval_config)
+        """Get or cache a ChromaDB collection for the given config.
+
+        The dataset_id is extracted from retrieval_config.dataset_id.
+        """
+        dataset_id = retrieval_config.dataset_id
+        collection_path = self._registry.resolve_collection_path(dataset_id, retrieval_config)
         if collection_path is None:
             raise ValueError(
                 "No collection found for dataset "
-                f"'{self._dataset_id}' and retrieval config model='{retrieval_config.model}', "
+                f"'{dataset_id}' and retrieval config model='{retrieval_config.model}', "
                 f"quantization='{retrieval_config.quantization}', dimensions={retrieval_config.dimensions}."
             )
 
