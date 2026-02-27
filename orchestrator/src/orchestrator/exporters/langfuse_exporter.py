@@ -61,7 +61,7 @@ class LangfuseExporter:
         """Export spans to Langfuse via OTLP.
 
         Args:
-            spans: List of evaluation spans to export.
+            spans: List of evaluation spans to export (typically root + children).
         """
         readable_spans = [self._to_readable_span(s) for s in spans]
         result = self._exporter.export(readable_spans)
@@ -69,7 +69,7 @@ class LangfuseExporter:
 
     def _to_readable_span(self, span: EvaluationSpan) -> ReadableSpan:
         """Convert EvaluationSpan to OTEL ReadableSpan with Langfuse attributes."""
-        attrs = self._build_langfuse_attributes(span.attributes)
+        attrs = self._build_langfuse_attributes(span)
 
         context = SpanContext(
             trace_id=span.context.trace_id,
@@ -78,6 +78,16 @@ class LangfuseExporter:
             trace_flags=TraceFlags(TraceFlags.SAMPLED),
         )
 
+        # Build parent context if span has a parent
+        parent_context = None
+        if span.parent is not None:
+            parent_context = SpanContext(
+                trace_id=span.parent.trace_id,
+                span_id=span.parent.span_id,
+                is_remote=False,
+                trace_flags=TraceFlags(TraceFlags.SAMPLED),
+            )
+
         status = Status(StatusCode.OK)
         if span.status.status_code.name == "ERROR":
             status = Status(StatusCode.ERROR)
@@ -85,7 +95,7 @@ class LangfuseExporter:
         return ReadableSpan(
             name=span.name,
             context=context,
-            parent=None,
+            parent=parent_context,
             resource=self._resource,
             attributes=attrs,
             start_time=span.start_time,
@@ -93,7 +103,7 @@ class LangfuseExporter:
             status=status,
         )
 
-    def _build_langfuse_attributes(self, attrs: dict[str, Any]) -> dict[str, Any]:
+    def _build_langfuse_attributes(self, span: EvaluationSpan) -> dict[str, Any]:
         """Build attributes dict with Langfuse-specific namespaced attributes.
 
         Langfuse maps certain attribute prefixes to their data model:
@@ -104,33 +114,36 @@ class LangfuseExporter:
         - langfuse.score.* -> evaluation scores
         - langfuse.trace.metadata.* -> filterable metadata
         """
+        attrs = span.attributes
         result = dict(attrs)
 
+        # Add user/session IDs for trace grouping
         result["langfuse.user.id"] = attrs.get("run_id", "unknown")
         result["langfuse.session.id"] = attrs.get("run_id", "unknown")
 
-        result["langfuse.observation.type"] = "generation"
+        # Set observation type based on span name
+        if span.name == "rag.generation":
+            result["langfuse.observation.type"] = "generation"
+        elif span.name == "rag.retrieval":
+            result["langfuse.observation.type"] = "span"
+        # Root span (rag.evaluation) doesn't need observation.type
 
-        prompt_tokens = attrs.get("custom.generation.prompt_tokens")
-        completion_tokens = attrs.get("custom.generation.completion_tokens")
-        if prompt_tokens is not None:
-            result["langfuse.observation.usage.input"] = prompt_tokens
-        if completion_tokens is not None:
-            result["langfuse.observation.usage.output"] = completion_tokens
+        # Add scores only for root span (they're trace-level metrics)
+        if span.parent is None:
+            score_mappings = [
+                ("custom.metrics.recall_at_k", "recall_at_k"),
+                ("custom.metrics.precision_at_k", "precision_at_k"),
+                ("custom.metrics.mrr", "mrr"),
+            ]
+            for attr_key, score_name in score_mappings:
+                value = attrs.get(attr_key)
+                if value is not None:
+                    result[f"langfuse.score.{score_name}"] = value
 
-        score_mappings = [
-            ("custom.metrics.recall_at_k", "recall_at_k"),
-            ("custom.metrics.precision_at_k", "precision_at_k"),
-            ("custom.metrics.mrr", "mrr"),
-        ]
-        for attr_key, score_name in score_mappings:
-            value = attrs.get(attr_key)
-            if value is not None:
-                result[f"langfuse.score.{score_name}"] = value
+            if attrs.get("custom.metrics.abstention") is True:
+                result["langfuse.score.abstention"] = 1.0
 
-        if attrs.get("custom.metrics.abstention") is True:
-            result["langfuse.score.abstention"] = 1.0
-
+        # Add filterable metadata
         result["langfuse.trace.metadata.run_id"] = attrs.get("run_id")
         result["langfuse.trace.metadata.claim_id"] = attrs.get("claim_id")
 

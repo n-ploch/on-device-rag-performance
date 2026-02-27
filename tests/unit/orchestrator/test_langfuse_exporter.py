@@ -19,6 +19,8 @@ def make_evaluation_span(
     span_id: int = 0x1234567890123456,
     start_time_ns: int = 1700000000000000000,
     end_time_ns: int = 1700000001500000000,
+    name: str = "rag.evaluation",
+    parent: SpanContext | None = None,
     attributes: dict | None = None,
 ) -> EvaluationSpan:
     """Create a test EvaluationSpan."""
@@ -51,11 +53,12 @@ def make_evaluation_span(
 
     return EvaluationSpan(
         context=SpanContext(trace_id=trace_id, span_id=span_id),
-        name="rag.evaluation",
+        name=name,
         start_time=start_time_ns,
         end_time=end_time_ns,
         status=SpanStatus(status_code=StatusCode(name="OK")),
         attributes=default_attrs,
+        parent=parent,
     )
 
 
@@ -227,12 +230,14 @@ class TestLangfuseAttributes:
 
     @patch("orchestrator.exporters.langfuse_exporter.OTLPSpanExporter")
     def test_marks_as_generation_type(self, mock_otlp_class, mock_env):
-        """Sets langfuse.observation.type to generation."""
+        """Sets langfuse.observation.type to generation for generation spans."""
         mock_exporter = MagicMock()
         mock_otlp_class.return_value = mock_exporter
 
         exporter = LangfuseExporter()
-        span = make_evaluation_span()
+        # Create a generation span (child of root)
+        parent_ctx = SpanContext(trace_id=0x1234, span_id=0x5678)
+        span = make_evaluation_span(name="rag.generation", parent=parent_ctx)
         exporter.export([span])
 
         exported_spans = mock_exporter.export.call_args[0][0]
@@ -240,16 +245,51 @@ class TestLangfuseAttributes:
         assert attrs["langfuse.observation.type"] == "generation"
 
     @patch("orchestrator.exporters.langfuse_exporter.OTLPSpanExporter")
-    def test_adds_usage_attributes(self, mock_otlp_class, mock_env):
-        """Adds langfuse.observation.usage.* attributes."""
+    def test_marks_retrieval_as_span_type(self, mock_otlp_class, mock_env):
+        """Sets langfuse.observation.type to span for retrieval spans."""
         mock_exporter = MagicMock()
         mock_otlp_class.return_value = mock_exporter
 
         exporter = LangfuseExporter()
-        span = make_evaluation_span(attributes={
-            "custom.generation.prompt_tokens": 100,
-            "custom.generation.completion_tokens": 50,
-        })
+        parent_ctx = SpanContext(trace_id=0x1234, span_id=0x5678)
+        span = make_evaluation_span(name="rag.retrieval", parent=parent_ctx)
+        exporter.export([span])
+
+        exported_spans = mock_exporter.export.call_args[0][0]
+        attrs = exported_spans[0].attributes
+        assert attrs["langfuse.observation.type"] == "span"
+
+    @patch("orchestrator.exporters.langfuse_exporter.OTLPSpanExporter")
+    def test_root_span_has_no_observation_type(self, mock_otlp_class, mock_env):
+        """Root span (rag.evaluation) has no observation.type."""
+        mock_exporter = MagicMock()
+        mock_otlp_class.return_value = mock_exporter
+
+        exporter = LangfuseExporter()
+        span = make_evaluation_span()  # Root span, no parent
+        exporter.export([span])
+
+        exported_spans = mock_exporter.export.call_args[0][0]
+        attrs = exported_spans[0].attributes
+        assert "langfuse.observation.type" not in attrs
+
+    @patch("orchestrator.exporters.langfuse_exporter.OTLPSpanExporter")
+    def test_preserves_usage_attributes_from_span(self, mock_otlp_class, mock_env):
+        """Preserves langfuse.observation.usage.* attributes set by span_converter."""
+        mock_exporter = MagicMock()
+        mock_otlp_class.return_value = mock_exporter
+
+        exporter = LangfuseExporter()
+        parent_ctx = SpanContext(trace_id=0x1234, span_id=0x5678)
+        # Generation span with usage attributes (as set by span_converter)
+        span = make_evaluation_span(
+            name="rag.generation",
+            parent=parent_ctx,
+            attributes={
+                "langfuse.observation.usage.input": 100,
+                "langfuse.observation.usage.output": 50,
+            }
+        )
         exporter.export([span])
 
         exported_spans = mock_exporter.export.call_args[0][0]
