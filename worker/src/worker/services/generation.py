@@ -100,17 +100,17 @@ class GenerationService:
         """Format prompt when no context is available."""
         return f"""<s>[INST] Answer the following question. If you cannot determine the answer, say "I don't know" or "Insufficient information".
 
-Question: {query}
+                Question: {query}
 
-Answer: [/INST]"""
+                Answer: [/INST]"""
 
     def _format_prompt_with_context(self, query: str, context: str) -> str:
         """Format prompt with retrieved context."""
         return f"""<s>[INST] Use the following context to answer the question. If the context doesn't contain enough information, say "I don't know" or "Insufficient information".
 
-Context:
-{context}
+                Context:
+                {context}
 
-Question: {query}
+                Question: {query}
 
-Answer: [/INST]"""
+                Answer: [/INST]"""
