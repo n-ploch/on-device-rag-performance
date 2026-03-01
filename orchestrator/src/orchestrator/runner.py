@@ -365,7 +365,6 @@ async def _run(
         finally:
             exporter.shutdown()
 
-    logger.info("Results written to %s", config.observability.output_jsonl)
     return 0
 
 
