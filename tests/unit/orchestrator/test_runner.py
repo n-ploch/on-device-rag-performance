@@ -46,6 +46,7 @@ def sample_run_config() -> RunConfig:
     return RunConfig(
         run_id="test_run",
         retrieval=RetrievalConfig(
+            dataset_id="scifact",
             model="intfloat/multilingual-e5-small",
             quantization="fp16",
             dimensions=384,

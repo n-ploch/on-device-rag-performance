@@ -71,6 +71,7 @@ class TestRetrievalConfig:
     def test_valid_config_with_fixed_chunking(self):
         """Full config with fixed chunking strategy."""
         config = RetrievalConfig(
+            dataset_id="scifact",
             model="intfloat/multilingual-e5-small",
             quantization="fp16",
             dimensions=384,
@@ -91,6 +92,7 @@ class TestRetrievalConfig:
     def test_valid_config_with_char_split_chunking(self):
         """Full config with char_split chunking strategy."""
         config = RetrievalConfig(
+            dataset_id="scifact",
             model="intfloat/multilingual-e5-small",
             quantization="fp16",
             dimensions=384,
@@ -106,28 +108,29 @@ class TestRetrievalConfig:
     def test_k_must_be_positive(self):
         """k must be > 0."""
         with pytest.raises(ValidationError):
-            RetrievalConfig(model="m", quantization="fp16", dimensions=384, k=0)
+            RetrievalConfig(dataset_id="scifact", model="m", quantization="fp16", dimensions=384, k=0)
         with pytest.raises(ValidationError):
-            RetrievalConfig(model="m", quantization="fp16", dimensions=384, k=-1)
+            RetrievalConfig(dataset_id="scifact", model="m", quantization="fp16", dimensions=384, k=-1)
 
     def test_dimensions_must_be_positive(self):
         """dimensions must be > 0."""
         with pytest.raises(ValidationError):
-            RetrievalConfig(model="m", quantization="fp16", dimensions=0, k=3)
+            RetrievalConfig(dataset_id="scifact", model="m", quantization="fp16", dimensions=0, k=3)
 
     def test_k_defaults_to_3(self):
         """k defaults to 3 if not specified."""
-        config = RetrievalConfig(model="m", quantization="fp16", dimensions=384)
+        config = RetrievalConfig(dataset_id="scifact", model="m", quantization="fp16", dimensions=384)
         assert config.k == 3
 
     def test_quantization_required(self):
         """quantization is required."""
         with pytest.raises(ValidationError):
-            RetrievalConfig(model="m", dimensions=384)
+            RetrievalConfig(dataset_id="scifact", model="m", dimensions=384)
 
     def test_chunking_optional(self):
         """chunking is optional."""
         config = RetrievalConfig(
+            dataset_id="scifact",
             model="m",
             quantization="fp16",
             dimensions=384,
@@ -161,6 +164,7 @@ class TestRunConfig:
         run = RunConfig(
             run_id="test_001",
             retrieval=RetrievalConfig(
+                dataset_id="scifact",
                 model="embed",
                 quantization="fp16",
                 dimensions=384,
@@ -177,7 +181,7 @@ class TestRunConfig:
         """run_id is required."""
         with pytest.raises(ValidationError):
             RunConfig(
-                retrieval=RetrievalConfig(model="m", quantization="fp16", dimensions=384),
+                retrieval=RetrievalConfig(dataset_id="scifact", model="m", quantization="fp16", dimensions=384),
                 generation=GenerationConfig(model="m"),
             )
 
@@ -186,6 +190,7 @@ class TestRunConfig:
         run = RunConfig(
             run_id="mistral_q4_baseline_001",
             retrieval=RetrievalConfig(
+                dataset_id="scifact",
                 model="intfloat/multilingual-e5-small",
                 quantization="fp16",
                 dimensions=384,
@@ -215,7 +220,7 @@ class TestGenerateRequest:
             input_prompt="Is aspirin effective?",
             run_config=RunConfig(
                 run_id="run_001",
-                retrieval=RetrievalConfig(model="embed", quantization="fp16", dimensions=384, k=3),
+                retrieval=RetrievalConfig(dataset_id="scifact", model="embed", quantization="fp16", dimensions=384, k=3),
                 generation=GenerationConfig(model="llm"),
             ),
         )
@@ -229,7 +234,7 @@ class TestGenerateRequest:
                 input_prompt="test",
                 run_config=RunConfig(
                     run_id="r1",
-                    retrieval=RetrievalConfig(model="m", quantization="fp16", dimensions=384),
+                    retrieval=RetrievalConfig(dataset_id="scifact", model="m", quantization="fp16", dimensions=384),
                     generation=GenerationConfig(model="m"),
                 ),
             )
@@ -241,7 +246,7 @@ class TestGenerateRequest:
                 claim_id="c1",
                 run_config=RunConfig(
                     run_id="r1",
-                    retrieval=RetrievalConfig(model="m", quantization="fp16", dimensions=384),
+                    retrieval=RetrievalConfig(dataset_id="scifact", model="m", quantization="fp16", dimensions=384),
                     generation=GenerationConfig(model="m"),
                 ),
             )
@@ -254,6 +259,7 @@ class TestGenerateRequest:
             run_config=RunConfig(
                 run_id="mistral_q4_baseline_001",
                 retrieval=RetrievalConfig(
+                    dataset_id="scifact",
                     model="intfloat/multilingual-e5-small",
                     quantization="fp16",
                     dimensions=384,
@@ -282,6 +288,7 @@ class TestGenerateRequest:
             run_config=RunConfig(
                 run_id="mistral_q4_k5_001",
                 retrieval=RetrievalConfig(
+                    dataset_id="scifact",
                     model="intfloat/multilingual-e5-small",
                     quantization="fp16",
                     dimensions=384,

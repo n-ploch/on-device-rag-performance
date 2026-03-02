@@ -34,6 +34,7 @@ def sample_corpus():
 def retrieval_config():
     """Standard retrieval config for tests."""
     return RetrievalConfig(
+        dataset_id="scifact",
         model="intfloat/multilingual-e5-small",
         quantization="fp16",
         dimensions=384,
@@ -46,6 +47,7 @@ def retrieval_config():
 def retrieval_config_no_chunking():
     """Retrieval config without chunking."""
     return RetrievalConfig(
+        dataset_id="scifact",
         model="intfloat/multilingual-e5-small",
         quantization="fp16",
         dimensions=384,
@@ -67,7 +69,6 @@ class TestEmbeddingService:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             result = service.embed_corpus(
                 corpus=sample_corpus,
-                dataset_id="scifact",
                 retrieval_config=retrieval_config,
             )
 
@@ -98,7 +99,6 @@ class TestEmbeddingService:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             result = service.embed_corpus(
                 corpus=sample_corpus,
-                dataset_id="scifact",
                 retrieval_config=retrieval_config,
             )
 
@@ -124,8 +124,7 @@ class TestEmbeddingService:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             result = service.embed_corpus(
                 corpus=sample_corpus,
-                dataset_id="scifact",
-                retrieval_config=retrieval_config_no_chunking,
+                                retrieval_config=retrieval_config_no_chunking,
             )
 
             # Without chunking, chunks == documents
@@ -144,7 +143,7 @@ class TestEmbeddingService:
 
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
-            result = service.collection_exists("scifact", retrieval_config)
+            result = service.collection_exists(retrieval_config)
 
             assert result is True
             mock_chromadb.PersistentClient.assert_called_once_with(path=str(resolved_path))
@@ -161,7 +160,7 @@ class TestEmbeddingService:
 
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
-            result = service.collection_exists("scifact", retrieval_config)
+            result = service.collection_exists(retrieval_config)
 
             assert result is False
             mock_chromadb.PersistentClient.assert_called_once_with(path=str(resolved_path))
@@ -180,7 +179,7 @@ class TestEmbeddingService:
 
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
-            result = service.collection_exists("scifact", retrieval_config)
+            result = service.collection_exists(retrieval_config)
 
             assert result is False
             mock_chromadb.PersistentClient.assert_called_once_with(path=str(resolved_path))
@@ -191,7 +190,7 @@ class TestEmbeddingService:
         """collection_exists returns False when registry has no entry."""
         with patch("worker.services.embedding.chromadb") as mock_chromadb:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
-            result = service.collection_exists("scifact", retrieval_config)
+            result = service.collection_exists(retrieval_config)
 
             assert result is False
             mock_chromadb.PersistentClient.assert_not_called()
@@ -216,8 +215,7 @@ class TestEmbeddingService:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             service.embed_corpus(
                 corpus=sample_corpus,
-                dataset_id="scifact",
-                retrieval_config=retrieval_config_no_chunking,
+                                retrieval_config=retrieval_config_no_chunking,
                 batch_size=2,
                 progress_callback=track_progress,
             )
@@ -242,7 +240,6 @@ class TestEmbeddingService:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             result = service.embed_corpus(
                 corpus=[CorpusDocument(id="doc1", text="test", metadata={})],
-                dataset_id="scifact",
                 retrieval_config=retrieval_config,
             )
 
@@ -263,6 +260,7 @@ class TestChunking:
             )
         ]
         config = RetrievalConfig(
+            dataset_id="test",
             model="test",
             quantization="fp16",
             dimensions=384,
@@ -280,7 +278,6 @@ class TestChunking:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             result = service.embed_corpus(
                 corpus=corpus,
-                dataset_id="test",
                 retrieval_config=config,
             )
 
@@ -298,6 +295,7 @@ class TestChunking:
             )
         ]
         config = RetrievalConfig(
+            dataset_id="test",
             model="test",
             quantization="fp16",
             dimensions=384,
@@ -315,7 +313,6 @@ class TestChunking:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             result = service.embed_corpus(
                 corpus=corpus,
-                dataset_id="test",
                 retrieval_config=config,
             )
 
@@ -332,6 +329,7 @@ class TestChunking:
             )
         ]
         config = RetrievalConfig(
+            dataset_id="test",
             model="test",
             quantization="fp16",
             dimensions=384,
@@ -349,7 +347,6 @@ class TestChunking:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             result = service.embed_corpus(
                 corpus=corpus,
-                dataset_id="test",
                 retrieval_config=config,
             )
 
@@ -360,6 +357,7 @@ class TestChunking:
         """Chunk metadata includes original doc_id."""
         corpus = [CorpusDocument(id="doc1", text="Test text", metadata={"title": "Test"})]
         config = RetrievalConfig(
+            dataset_id="test",
             model="test",
             quantization="fp16",
             dimensions=384,
@@ -376,7 +374,6 @@ class TestChunking:
             service = EmbeddingService(embedder=mock_embedder, collections_dir=tmp_path)
             service.embed_corpus(
                 corpus=corpus,
-                dataset_id="test",
                 retrieval_config=config,
             )
 

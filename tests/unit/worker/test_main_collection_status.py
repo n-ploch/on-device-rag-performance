@@ -31,8 +31,8 @@ async def test_collection_status_uses_resolved_folder_name(tmp_path):
     embedding_service.resolve_collection_path.return_value = resolved_path
 
     request = CollectionStatusRequest(
-        dataset_id="scifact",
         retrieval_config=RetrievalConfig(
+            dataset_id="scifact",
             model="intfloat/multilingual-e5-small",
             quantization="fp16",
             dimensions=384,

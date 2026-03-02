@@ -426,3 +426,166 @@ class TestOTELAttributeFormat:
         if "custom.hardware.peak_cpu_temp_c" in attrs:
             assert attrs["custom.hardware.peak_cpu_temp_c"].get("doubleValue") is None or \
                    "nullValue" in attrs["custom.hardware.peak_cpu_temp_c"]
+
+
+class TestSpanConverterResultToSpans:
+    """Tests for span_converter.result_to_spans function."""
+
+    def _make_ground_truth(self):
+        """Create a sample GroundTruthEntry for testing."""
+        from orchestrator.datasets.schemas import GroundTruthEntry
+        return GroundTruthEntry(
+            id="claim_001",
+            input="What is the effect of aspirin?",
+            expected_label="Aspirin reduces pain and inflammation.",
+            supporting_documents=["doc1"],
+        )
+
+    def _make_response(self, retrieved_chunks=None):
+        """Create a sample GenerateResponse for testing."""
+        from shared_types.schemas import GenerateResponse, RetrievalData
+        if retrieved_chunks is None:
+            chunks = [
+                "Aspirin is used for pain relief.",
+                "Studies show aspirin reduces inflammation.",
+                "Aspirin also helps with heart conditions.",
+            ]
+            doc_ids = ["doc1", "doc2", "doc3"]
+        else:
+            chunks = retrieved_chunks
+            doc_ids = [f"doc{i+1}" for i in range(len(chunks))]
+        return GenerateResponse(
+            output="Based on retrieved context, aspirin helps with pain.",
+            inference_measurement=make_inference_measurement(),
+            hardware_measurement=make_hardware_measurement(),
+            retrieval_data=RetrievalData(
+                cited_doc_ids=doc_ids,
+                retrieved_chunks=chunks,
+            ),
+        )
+
+    def test_trace_ids_are_unique_across_calls(self):
+        """Trace IDs should be unique even with same run_id and claim_id."""
+        from orchestrator.exporters.span_converter import result_to_spans
+
+        ground_truth = self._make_ground_truth()
+        response = self._make_response()
+
+        spans1 = result_to_spans(
+            run_id="run_001",
+            claim_id="claim_001",
+            ground_truth=ground_truth,
+            response=response,
+            recall_at_k=1.0,
+            precision_at_k=0.33,
+            mrr=1.0,
+            is_abstention=False,
+        )
+        spans2 = result_to_spans(
+            run_id="run_001",
+            claim_id="claim_001",
+            ground_truth=ground_truth,
+            response=response,
+            recall_at_k=1.0,
+            precision_at_k=0.33,
+            mrr=1.0,
+            is_abstention=False,
+        )
+
+        # Trace IDs should be different (unique due to UUID prefix)
+        assert spans1[0].context.trace_id != spans2[0].context.trace_id
+
+    def test_root_span_has_expected_answer(self):
+        """Root span should contain custom.evaluation.expected_answer attribute."""
+        from orchestrator.exporters.span_converter import result_to_spans
+
+        ground_truth = self._make_ground_truth()
+        response = self._make_response()
+
+        spans = result_to_spans(
+            run_id="run_001",
+            claim_id="claim_001",
+            ground_truth=ground_truth,
+            response=response,
+            recall_at_k=1.0,
+            precision_at_k=0.33,
+            mrr=1.0,
+            is_abstention=False,
+        )
+
+        root_span = spans[0]
+        assert root_span.name == "rag.evaluation"
+        assert "custom.evaluation.expected_answer" in root_span.attributes
+        assert root_span.attributes["custom.evaluation.expected_answer"] == "Aspirin reduces pain and inflammation."
+
+    def test_root_span_has_retrieval_context(self):
+        """Root span should contain custom.retrieval.context attribute."""
+        from orchestrator.exporters.span_converter import result_to_spans
+
+        ground_truth = self._make_ground_truth()
+        chunks = ["Chunk 1", "Chunk 2", "Chunk 3"]
+        response = self._make_response(retrieved_chunks=chunks)
+
+        spans = result_to_spans(
+            run_id="run_001",
+            claim_id="claim_001",
+            ground_truth=ground_truth,
+            response=response,
+            recall_at_k=1.0,
+            precision_at_k=0.33,
+            mrr=1.0,
+            is_abstention=False,
+        )
+
+        root_span = spans[0]
+        assert "custom.retrieval.context" in root_span.attributes
+        expected_context = "\n---\n".join(chunks)
+        assert root_span.attributes["custom.retrieval.context"] == expected_context
+
+    def test_retrieval_span_has_retrieval_context(self):
+        """Retrieval span should contain custom.retrieval.context attribute."""
+        from orchestrator.exporters.span_converter import result_to_spans
+
+        ground_truth = self._make_ground_truth()
+        chunks = ["Context A", "Context B"]
+        response = self._make_response(retrieved_chunks=chunks)
+
+        spans = result_to_spans(
+            run_id="run_001",
+            claim_id="claim_001",
+            ground_truth=ground_truth,
+            response=response,
+            recall_at_k=1.0,
+            precision_at_k=0.33,
+            mrr=1.0,
+            is_abstention=False,
+        )
+
+        retrieval_span = spans[1]
+        assert retrieval_span.name == "rag.retrieval"
+        assert "custom.retrieval.context" in retrieval_span.attributes
+        expected_context = "\n---\n".join(chunks)
+        assert retrieval_span.attributes["custom.retrieval.context"] == expected_context
+
+    def test_retrieval_context_empty_when_no_chunks(self):
+        """Retrieval context should be empty string when no chunks."""
+        from orchestrator.exporters.span_converter import result_to_spans
+
+        ground_truth = self._make_ground_truth()
+        response = self._make_response(retrieved_chunks=[])
+
+        spans = result_to_spans(
+            run_id="run_001",
+            claim_id="claim_001",
+            ground_truth=ground_truth,
+            response=response,
+            recall_at_k=0.0,
+            precision_at_k=0.0,
+            mrr=0.0,
+            is_abstention=True,
+        )
+
+        root_span = spans[0]
+        retrieval_span = spans[1]
+        assert root_span.attributes["custom.retrieval.context"] == ""
+        assert retrieval_span.attributes["custom.retrieval.context"] == ""

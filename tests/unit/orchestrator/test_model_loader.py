@@ -34,6 +34,7 @@ def sample_config_data() -> dict:
             {
                 "run_id": "test_run_1",
                 "retrieval": {
+                    "dataset_id": "scifact",
                     "model": "intfloat/multilingual-e5-small",
                     "quantization": "fp16",
                     "dimensions": 384,
@@ -46,6 +47,7 @@ def sample_config_data() -> dict:
             {
                 "run_id": "test_run_2",
                 "retrieval": {
+                    "dataset_id": "scifact",
                     "model": "intfloat/multilingual-e5-small",
                     "quantization": "fp16",
                     "dimensions": 384,
