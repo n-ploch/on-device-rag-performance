@@ -122,7 +122,7 @@ class TestGenerateEndpoint:
                 "input_prompt": "Is aspirin effective?",
                 "run_config": {
                     "run_id": "test_run",
-                    "retrieval": {"model": "embed", "quantization": "fp16", "dimensions": 384, "k": 3},
+                    "retrieval": {"dataset_id": "scifact", "model": "embed", "quantization": "fp16", "dimensions": 384, "k": 3},
                     "generation": {"model": "llm"},
                 },
             },
@@ -172,7 +172,7 @@ class TestGenerateEndpoint:
                 "input_prompt": "test",
                 "run_config": {
                     "run_id": "r1",
-                    "retrieval": {"model": "m", "quantization": "fp16", "dimensions": 384},
+                    "retrieval": {"dataset_id": "scifact", "model": "m", "quantization": "fp16", "dimensions": 384},
                     "generation": {"model": "m"},
                 },
             },
@@ -187,7 +187,7 @@ class TestGenerateEndpoint:
                 "claim_id": "c1",
                 "run_config": {
                     "run_id": "r1",
-                    "retrieval": {"model": "m", "quantization": "fp16", "dimensions": 384},
+                    "retrieval": {"dataset_id": "scifact", "model": "m", "quantization": "fp16", "dimensions": 384},
                     "generation": {"model": "m"},
                 },
             },
@@ -204,6 +204,7 @@ class TestGenerateEndpoint:
                 "run_config": {
                     "run_id": "mistral_q4_baseline_001",
                     "retrieval": {
+                        "dataset_id": "scifact",
                         "model": "intfloat/multilingual-e5-small",
                         "quantization": "fp16",
                         "dimensions": 384,
@@ -233,6 +234,7 @@ class TestGenerateEndpoint:
                 "run_config": {
                     "run_id": "mistral_q4_k5_001",
                     "retrieval": {
+                        "dataset_id": "scifact",
                         "model": "intfloat/multilingual-e5-small",
                         "quantization": "fp16",
                         "dimensions": 384,

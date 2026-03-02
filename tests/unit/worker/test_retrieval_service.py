@@ -21,6 +21,7 @@ def mock_embedder():
 def retrieval_config():
     """Standard retrieval config for tests."""
     return RetrievalConfig(
+        dataset_id="scifact",
         model="intfloat/multilingual-e5-small",
         quantization="fp16",
         dimensions=384,
@@ -48,7 +49,6 @@ class TestRetrievalService:
             service = RetrievalService(
                 embedder=mock_embedder,
                 collections_dir=tmp_path,
-                dataset_id="scifact",
             )
             resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
 
@@ -69,6 +69,7 @@ class TestRetrievalService:
     def test_retrieve_respects_k_parameter(self, tmp_path, mock_embedder):
         """Retrieval uses the k parameter from config."""
         config = RetrievalConfig(
+            dataset_id="scifact",
             model="intfloat/multilingual-e5-small",
             quantization="fp16",
             dimensions=384,
@@ -106,7 +107,6 @@ class TestRetrievalService:
             service = RetrievalService(
                 embedder=mock_embedder,
                 collections_dir=tmp_path,
-                dataset_id="scifact",
             )
             resolved_path = service._registry.get_or_create_collection("scifact", retrieval_config)
             service.retrieve("test", retrieval_config)
@@ -124,7 +124,6 @@ class TestRetrievalService:
             service = RetrievalService(
                 embedder=mock_embedder,
                 collections_dir=tmp_path,
-                dataset_id="scifact",
             )
 
             with pytest.raises(ValueError, match="No collection found for dataset"):

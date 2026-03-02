@@ -10,6 +10,7 @@ from shared_types.schemas import ChunkingConfig, RetrievalConfig
 
 def _fixed(chunk_size: int, chunk_overlap: int = 64) -> RetrievalConfig:
     return RetrievalConfig(
+        dataset_id="scifact",
         model="intfloat/multilingual-e5-small",
         quantization="fp16",
         dimensions=384,
@@ -24,6 +25,7 @@ def _fixed(chunk_size: int, chunk_overlap: int = 64) -> RetrievalConfig:
 
 def _char_split(split_sequence: str = ". ") -> RetrievalConfig:
     return RetrievalConfig(
+        dataset_id="scifact",
         model="intfloat/multilingual-e5-small",
         quantization="fp16",
         dimensions=384,
