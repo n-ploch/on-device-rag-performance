@@ -12,6 +12,7 @@ import chromadb
 from fastapi import FastAPI, HTTPException, Request
 
 from worker.logging_config import setup_logging
+from worker.tracing import extract_context, get_tracer, setup_tracing, shutdown_tracing
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -80,6 +81,9 @@ async def lifespan(app: FastAPI):
     app.state.embedding_service = None
     app.state.generation_service = None
 
+    # Initialize OTEL tracing
+    setup_tracing()
+
     logger.info(
         "Worker initialized with llama-server backend, waiting for /load_models call "
         "(embedding port: %d, generation port: %d)",
@@ -88,9 +92,10 @@ async def lifespan(app: FastAPI):
     )
     yield
 
-    # Cleanup: stop all servers
+    # Cleanup: stop all servers and shutdown tracing
     logger.info("Shutting down, stopping llama-server instances")
     await app.state.server_manager.close()
+    shutdown_tracing()
 
 
 def create_app() -> FastAPI:
@@ -226,19 +231,77 @@ def create_app() -> FastAPI:
         retrieval_service: RetrievalService = req.app.state.retrieval_service
         generation_service: GenerationService = req.app.state.generation_service
 
+        # Extract trace context from incoming request headers
+        ctx = extract_context(dict(req.headers))
+        tracer = get_tracer()
+
         e2e_start = time.perf_counter()
         async with HardwareMonitor() as monitor:
-            retrieval_start = time.perf_counter()
-            retrieved = retrieval_service.retrieve(
-                request.input_prompt,
-                request.run_config.retrieval,
-            )
-            retrieval_latency_ms = (time.perf_counter() - retrieval_start) * 1000
+            # Create retrieval span as child of orchestrator's root span
+            with tracer.start_span(
+                "rag.retrieval",
+                context=ctx,
+                attributes={
+                    "run_id": request.run_config.run_id,
+                    "claim_id": request.claim_id,
+                },
+            ) as retrieval_span:
+                retrieval_start = time.perf_counter()
+                retrieved = retrieval_service.retrieve(
+                    request.input_prompt,
+                    request.run_config.retrieval,
+                )
+                retrieval_latency_ms = (time.perf_counter() - retrieval_start) * 1000
 
-            gen_result = generation_service.generate(
-                prompt=request.input_prompt,
-                retrieval_chunks=retrieved,
-            )
+                # Enrich retrieval span
+                doc_ids = [item["metadata"].get("doc_id", item["id"]) for item in retrieved]
+                retrieval_span.set_attribute("custom.latency.retrieval_latency_ms", retrieval_latency_ms)
+                retrieval_span.set_attribute("custom.retrieval.k", len(retrieved))
+                retrieval_span.set_attribute("custom.retrieval.cited_doc_ids", ",".join(doc_ids))
+
+            # Create generation span as child of orchestrator's root span
+            with tracer.start_span(
+                "rag.generation",
+                context=ctx,
+                attributes={
+                    "run_id": request.run_config.run_id,
+                    "claim_id": request.claim_id,
+                    "langfuse.observation.type": "generation",
+                },
+            ) as generation_span:
+                gen_result = generation_service.generate(
+                    prompt=request.input_prompt,
+                    retrieval_chunks=retrieved,
+                )
+
+                # Build retrieval context for the span
+                retrieval_context = "\n---\n".join(item["text"] for item in retrieved)
+
+                # Enrich generation span with llama measurements
+                generation_span.set_attribute("gen_ai.prompt", request.input_prompt)
+                generation_span.set_attribute("gen_ai.completion", gen_result.text)
+                generation_span.set_attribute("retrieval_context", retrieval_context)
+
+                # Include expected response (ground truth) if provided
+                if request.expected_response:
+                    generation_span.set_attribute("ground_truth", request.expected_response)
+
+                # Latency measurements from llama.cpp
+                ttft_ms = gen_result.prompt_ms + gen_result.predicted_per_token_ms
+                generation_span.set_attribute("custom.latency.ttft_ms", ttft_ms)
+                generation_span.set_attribute("custom.latency.llm_generation_latency_ms", gen_result.predicted_ms)
+                generation_span.set_attribute("custom.latency.prompt_ms", gen_result.prompt_ms)
+                generation_span.set_attribute("custom.latency.predicted_ms", gen_result.predicted_ms)
+                generation_span.set_attribute("custom.latency.predicted_per_token_ms", gen_result.predicted_per_token_ms)
+
+                # Token metrics
+                generation_span.set_attribute("custom.generation.prompt_tokens", gen_result.prompt_tokens)
+                generation_span.set_attribute("custom.generation.completion_tokens", gen_result.completion_tokens)
+                generation_span.set_attribute("custom.generation.tokens_per_second", gen_result.predicted_per_second)
+
+                # Langfuse-specific usage attributes
+                generation_span.set_attribute("langfuse.observation.usage.input", gen_result.prompt_tokens)
+                generation_span.set_attribute("langfuse.observation.usage.output", gen_result.completion_tokens)
 
         e2e_latency_ms = (time.perf_counter() - e2e_start) * 1000
 
