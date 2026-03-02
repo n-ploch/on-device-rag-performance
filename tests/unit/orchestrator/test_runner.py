@@ -29,6 +29,19 @@ from shared_types.schemas import (
 
 
 @pytest.fixture
+def mock_tracer():
+    """Mock OTEL tracer for testing."""
+    mock_span = MagicMock()
+    mock_span.__enter__ = MagicMock(return_value=mock_span)
+    mock_span.__exit__ = MagicMock(return_value=None)
+    mock_span.set_attribute = MagicMock()
+
+    tracer = MagicMock()
+    tracer.start_as_current_span = MagicMock(return_value=mock_span)
+    return tracer
+
+
+@pytest.fixture
 def sample_ground_truth_entry() -> GroundTruthEntry:
     """Sample ground truth entry for testing."""
     return GroundTruthEntry(
@@ -156,7 +169,7 @@ class TestEvaluateSingle:
 
     @pytest.mark.asyncio
     async def test_calls_generate_endpoint(
-        self, sample_ground_truth_entry, sample_run_config, sample_generate_response
+        self, sample_ground_truth_entry, sample_run_config, sample_generate_response, mock_tracer
     ):
         """Should call /generate endpoint and return result."""
         mock_client = AsyncMock()
@@ -169,6 +182,7 @@ class TestEvaluateSingle:
             mock_client,
             sample_ground_truth_entry,
             sample_run_config,
+            mock_tracer,
         )
 
         assert result.run_id == "test_run"
@@ -182,7 +196,7 @@ class TestEvaluateSingle:
 
     @pytest.mark.asyncio
     async def test_computes_retrieval_metrics(
-        self, sample_ground_truth_entry, sample_run_config, sample_generate_response
+        self, sample_ground_truth_entry, sample_run_config, sample_generate_response, mock_tracer
     ):
         """Should compute recall, precision, and MRR."""
         mock_client = AsyncMock()
@@ -195,6 +209,7 @@ class TestEvaluateSingle:
             mock_client,
             sample_ground_truth_entry,
             sample_run_config,
+            mock_tracer,
         )
 
         # doc_1 is in supporting_documents and retrieved (at position 0)
@@ -206,7 +221,7 @@ class TestEvaluateSingle:
 
     @pytest.mark.asyncio
     async def test_detects_abstention(
-        self, sample_ground_truth_entry, sample_run_config
+        self, sample_ground_truth_entry, sample_run_config, mock_tracer
     ):
         """Should detect abstention in output."""
         abstention_response = GenerateResponse(
@@ -242,12 +257,13 @@ class TestEvaluateSingle:
             mock_client,
             sample_ground_truth_entry,
             sample_run_config,
+            mock_tracer,
         )
 
         assert result.is_abstention is True
 
     @pytest.mark.asyncio
-    async def test_handles_no_supporting_documents(self, sample_run_config):
+    async def test_handles_no_supporting_documents(self, sample_run_config, mock_tracer):
         """Should handle entries with no supporting documents."""
         entry = GroundTruthEntry(
             id="claim_no_docs",
@@ -286,7 +302,7 @@ class TestEvaluateSingle:
         mock_response.raise_for_status = MagicMock()
         mock_client.post.return_value = mock_response
 
-        result = await evaluate_single(mock_client, entry, sample_run_config)
+        result = await evaluate_single(mock_client, entry, sample_run_config, mock_tracer)
 
         # No supporting documents means metrics should be None
         assert result.recall_at_k is None
