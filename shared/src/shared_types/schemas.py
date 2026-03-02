@@ -63,6 +63,7 @@ class GenerateRequest(BaseModel):
     claim_id: str
     input_prompt: str
     run_config: RunConfig
+    expected_response: str | None = None  # Ground truth for tracing
 
 
 class RetrievalData(BaseModel):
