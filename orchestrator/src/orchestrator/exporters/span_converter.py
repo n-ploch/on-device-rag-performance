@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,8 +53,10 @@ def _generate_span_id(seed: str) -> int:
 
 
 def _generate_trace_id(seed: str) -> int:
-    """Generate a deterministic 128-bit trace ID from a seed string."""
-    return int(hashlib.sha256(seed.encode()).hexdigest()[:32], 16)
+    """Generate a unique 128-bit trace ID with UUID prefix for global uniqueness."""
+    unique_prefix = uuid.uuid4().hex[:8]
+    combined_seed = f"{unique_prefix}:{seed}"
+    return int(hashlib.sha256(combined_seed.encode()).hexdigest()[:32], 16)
 
 
 def _ms_to_ns(ms: float) -> int:
@@ -115,12 +118,18 @@ def result_to_spans(
     hw = response.hardware_measurement
     ret = response.retrieval_data
 
+    # Build retrieval context string for evaluation
+    retrieval_context = "\n---\n".join(ret.retrieved_chunks) if ret.retrieved_chunks else ""
+
     # === Root span: overall evaluation with metrics ===
     root_attrs: dict[str, Any] = {
         "run_id": run_id,
         "claim_id": claim_id,
         "gen_ai.prompt": ground_truth.input,
         "gen_ai.completion": response.output,
+        # Evaluation attributes
+        "custom.retrieval.context": retrieval_context,
+        "custom.evaluation.expected_answer": ground_truth.expected_label,
         # Metrics
         "custom.metrics.abstention": is_abstention,
         # E2E latency
@@ -131,6 +140,7 @@ def result_to_spans(
         "custom.hardware.swap_in_bytes": hw.swap_in_bytes,
         "custom.hardware.swap_out_bytes": hw.swap_out_bytes,
     }
+    # Optional evaluation attributes
     if recall_at_k is not None:
         root_attrs["custom.metrics.recall_at_k"] = recall_at_k
     if precision_at_k is not None:
@@ -157,6 +167,7 @@ def result_to_spans(
         "custom.latency.retrieval_latency_ms": inf.retrieval_latency_ms,
         "custom.retrieval.k": len(ret.cited_doc_ids),
         "custom.retrieval.cited_doc_ids": ",".join(ret.cited_doc_ids),
+        "custom.retrieval.context": retrieval_context,
     }
 
     retrieval_span = EvaluationSpan(
@@ -180,11 +191,15 @@ def result_to_spans(
         "custom.generation.prompt_tokens": inf.prompt_tokens,
         "custom.generation.completion_tokens": inf.completion_tokens,
         "custom.generation.tokens_per_second": inf.tokens_per_second,
+        "custom.retrieval.context": retrieval_context,
         # Mark as generation type for Langfuse
         "langfuse.observation.type": "generation",
         "langfuse.observation.usage.input": inf.prompt_tokens,
         "langfuse.observation.usage.output": inf.completion_tokens,
     }
+
+    if ground_truth.expected_label is not None:
+        generation_attrs["custom.evaluation.expected_answer"] = ground_truth.expected_label
 
     generation_span = EvaluationSpan(
         context=SpanContext(trace_id=trace_id, span_id=generation_span_id),
