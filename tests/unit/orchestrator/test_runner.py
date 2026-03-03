@@ -29,16 +29,24 @@ from shared_types.schemas import (
 
 
 @pytest.fixture
-def mock_tracer():
-    """Mock OTEL tracer for testing."""
+def mock_langfuse():
+    """Mock Langfuse client for testing."""
     mock_span = MagicMock()
     mock_span.__enter__ = MagicMock(return_value=mock_span)
     mock_span.__exit__ = MagicMock(return_value=None)
-    mock_span.set_attribute = MagicMock()
+    mock_span.trace_id = "test-trace-id"
+    mock_span.id = "test-span-id"
+    mock_span.update = MagicMock()
+    mock_span.score = MagicMock()
 
-    tracer = MagicMock()
-    tracer.start_as_current_span = MagicMock(return_value=mock_span)
-    return tracer
+    mock_propagate_ctx = MagicMock()
+    mock_propagate_ctx.__enter__ = MagicMock(return_value=None)
+    mock_propagate_ctx.__exit__ = MagicMock(return_value=None)
+
+    langfuse = MagicMock()
+    langfuse.start_as_current_span = MagicMock(return_value=mock_span)
+    langfuse.propagate_attributes = MagicMock(return_value=mock_propagate_ctx)
+    return langfuse
 
 
 @pytest.fixture
@@ -169,7 +177,7 @@ class TestEvaluateSingle:
 
     @pytest.mark.asyncio
     async def test_calls_generate_endpoint(
-        self, sample_ground_truth_entry, sample_run_config, sample_generate_response, mock_tracer
+        self, sample_ground_truth_entry, sample_run_config, sample_generate_response, mock_langfuse
     ):
         """Should call /generate endpoint and return result."""
         mock_client = AsyncMock()
@@ -182,7 +190,7 @@ class TestEvaluateSingle:
             mock_client,
             sample_ground_truth_entry,
             sample_run_config,
-            mock_tracer,
+            mock_langfuse,
         )
 
         assert result.run_id == "test_run"
@@ -196,7 +204,7 @@ class TestEvaluateSingle:
 
     @pytest.mark.asyncio
     async def test_computes_retrieval_metrics(
-        self, sample_ground_truth_entry, sample_run_config, sample_generate_response, mock_tracer
+        self, sample_ground_truth_entry, sample_run_config, sample_generate_response, mock_langfuse
     ):
         """Should compute recall, precision, and MRR."""
         mock_client = AsyncMock()
@@ -209,7 +217,7 @@ class TestEvaluateSingle:
             mock_client,
             sample_ground_truth_entry,
             sample_run_config,
-            mock_tracer,
+            mock_langfuse,
         )
 
         # doc_1 is in supporting_documents and retrieved (at position 0)
@@ -221,7 +229,7 @@ class TestEvaluateSingle:
 
     @pytest.mark.asyncio
     async def test_detects_abstention(
-        self, sample_ground_truth_entry, sample_run_config, mock_tracer
+        self, sample_ground_truth_entry, sample_run_config, mock_langfuse
     ):
         """Should detect abstention in output."""
         abstention_response = GenerateResponse(
@@ -257,13 +265,13 @@ class TestEvaluateSingle:
             mock_client,
             sample_ground_truth_entry,
             sample_run_config,
-            mock_tracer,
+            mock_langfuse,
         )
 
         assert result.is_abstention is True
 
     @pytest.mark.asyncio
-    async def test_handles_no_supporting_documents(self, sample_run_config, mock_tracer):
+    async def test_handles_no_supporting_documents(self, sample_run_config, mock_langfuse):
         """Should handle entries with no supporting documents."""
         entry = GroundTruthEntry(
             id="claim_no_docs",
@@ -302,7 +310,7 @@ class TestEvaluateSingle:
         mock_response.raise_for_status = MagicMock()
         mock_client.post.return_value = mock_response
 
-        result = await evaluate_single(mock_client, entry, sample_run_config, mock_tracer)
+        result = await evaluate_single(mock_client, entry, sample_run_config, mock_langfuse)
 
         # No supporting documents means metrics should be None
         assert result.recall_at_k is None

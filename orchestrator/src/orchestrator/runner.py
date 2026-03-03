@@ -23,8 +23,7 @@ load_dotenv()
 
 import httpx
 import pyarrow.parquet as pq
-from opentelemetry import trace
-from opentelemetry.propagate import inject
+from langfuse import Langfuse, propagate_attributes
 from pydantic import BaseModel
 
 from orchestrator.config import EvalConfig
@@ -32,7 +31,7 @@ from orchestrator.datasets import HuggingFaceRAGBench, HuggingFaceSciFact
 from orchestrator.datasets.schemas import GroundTruthEntry
 from orchestrator.metrics import detect_abstention, mrr, precision_at_k, recall_at_k
 from orchestrator.orchestrator import DatasetNotFoundError, Orchestrator
-from orchestrator.tracing import setup_tracing, shutdown_tracing
+from orchestrator.tracing import get_langfuse_client, shutdown_tracing
 from shared_types.schemas import GenerateRequest, GenerateResponse, RunConfig
 
 logger = logging.getLogger(__name__)
@@ -141,127 +140,134 @@ async def evaluate_single(
     client: httpx.AsyncClient,
     entry: GroundTruthEntry,
     run_config: RunConfig,
-    tracer: trace.Tracer,
+    langfuse: Langfuse,
 ) -> EvaluationResult:
-    """Evaluate a single ground truth entry with active tracing.
+    """Evaluate a single ground truth entry with Langfuse tracing.
 
-    Creates a root span for the evaluation and injects trace context
-    into the HTTP request for distributed tracing to the worker.
+    Creates a root trace span for the evaluation and passes the trace context
+    to the worker via custom HTTP headers for distributed tracing.
 
     Args:
         client: HTTP client for worker communication.
         entry: Ground truth entry to evaluate.
         run_config: Run configuration for this evaluation.
-        tracer: OTEL tracer for span creation.
+        langfuse: Langfuse client for span creation.
 
     Returns:
         EvaluationResult with response and computed metrics.
     """
-    with tracer.start_as_current_span(
-        "rag.evaluation",
-        attributes={
-            "run_id": run_config.run_id,
-            "claim_id": entry.id,
-            "gen_ai.prompt": entry.input,
-            "ground_truth": entry.expected_response or "",
-        },
-    ) as span:
-        # Prepare request with expected_response for worker tracing
-        request = GenerateRequest(
-            claim_id=entry.id,
-            input_prompt=entry.input,
-            run_config=run_config,
-            expected_response=entry.expected_response,
-        )
+    metadata: dict = {"claim_id": entry.id, "run_id": run_config.run_id}
+    if entry.expected_response:
+        metadata["ground_truth"] = entry.expected_response
 
-        # Inject trace context into headers for distributed tracing
-        headers: dict[str, str] = {}
-        inject(headers)
+    with langfuse.start_as_current_span(
+        name="rag.evaluation",
+        input=entry.input,
+        metadata=metadata,
+    ) as root_span:
+        with propagate_attributes(
+            user_id=run_config.run_id,
+            session_id=run_config.run_id,
+        ):
+            # Pass trace context to worker via custom headers
+            headers: dict[str, str] = {
+                "X-Langfuse-Trace-Id": root_span.trace_id,
+                "X-Langfuse-Parent-Span-Id": root_span.id,
+            }
 
-        response = await client.post(
-            "/generate",
-            json=request.model_dump(),
-            headers=headers,
-            timeout=httpx.Timeout(300.0),
-        )
-        response.raise_for_status()
+            request = GenerateRequest(
+                claim_id=entry.id,
+                input_prompt=entry.input,
+                run_config=run_config,
+                expected_response=entry.expected_response,
+            )
 
-        gen_response = GenerateResponse.model_validate(response.json())
+            response = await client.post(
+                "/generate",
+                json=request.model_dump(),
+                headers=headers,
+                timeout=httpx.Timeout(300.0),
+            )
+            response.raise_for_status()
 
-        # Compute retrieval metrics
-        relevant_docs = set(entry.supporting_documents)
-        retrieved_docs = gen_response.retrieval_data.cited_doc_ids
-        k = run_config.retrieval.k
+            gen_response = GenerateResponse.model_validate(response.json())
 
-        result_recall = None
-        result_precision = None
-        result_mrr = None
+            # Compute retrieval metrics
+            relevant_docs = set(entry.supporting_documents)
+            retrieved_docs = gen_response.retrieval_data.cited_doc_ids
+            k = run_config.retrieval.k
 
-        if relevant_docs:
-            result_recall = recall_at_k(retrieved_docs, relevant_docs, k)
-            result_precision = precision_at_k(retrieved_docs, relevant_docs, k)
-            result_mrr = mrr(retrieved_docs, relevant_docs)
+            result_recall = None
+            result_precision = None
+            result_mrr = None
 
-        is_abstention = detect_abstention(gen_response.output)
+            if relevant_docs:
+                result_recall = recall_at_k(retrieved_docs, relevant_docs, k)
+                result_precision = precision_at_k(retrieved_docs, relevant_docs, k)
+                result_mrr = mrr(retrieved_docs, relevant_docs)
 
-        # Enrich span with response data and metrics
-        span.set_attribute("gen_ai.completion", gen_response.output)
+            is_abstention = detect_abstention(gen_response.output)
 
-        # Build retrieval context string
-        ret = gen_response.retrieval_data
-        retrieval_context = "\n---\n".join(ret.retrieved_chunks) if ret.retrieved_chunks else ""
-        span.set_attribute("retrieval_context", retrieval_context)
+            # Build retrieval context string
+            ret = gen_response.retrieval_data
+            retrieval_context = "\n---\n".join(ret.retrieved_chunks) if ret.retrieved_chunks else ""
 
-        # Metrics
-        span.set_attribute("custom.metrics.abstention", is_abstention)
-        if result_recall is not None:
-            span.set_attribute("custom.metrics.recall_at_k", result_recall)
-        if result_precision is not None:
-            span.set_attribute("custom.metrics.precision_at_k", result_precision)
-        if result_mrr is not None:
-            span.set_attribute("custom.metrics.mrr", result_mrr)
+            # Update root span with output and full metadata
+            inf = gen_response.inference_measurement
+            hw = gen_response.hardware_measurement
+            output_metadata: dict = {
+                "retrieval_context": retrieval_context,
+                "e2e_latency_ms": inf.e2e_latency_ms,
+                "hardware": {
+                    "max_ram_usage_mb": hw.max_ram_usage_mb,
+                    "avg_cpu_utilization_pct": hw.avg_cpu_utilization_pct,
+                    "swap_in_bytes": hw.swap_in_bytes,
+                    "swap_out_bytes": hw.swap_out_bytes,
+                },
+            }
+            if hw.peak_cpu_temp_c is not None:
+                output_metadata["hardware"]["peak_cpu_temp_c"] = hw.peak_cpu_temp_c
 
-        # Latency and hardware from inference measurement
-        inf = gen_response.inference_measurement
-        span.set_attribute("custom.latency.e2e_latency_ms", inf.e2e_latency_ms)
+            root_span.update(output=gen_response.output, metadata=output_metadata)
 
-        hw = gen_response.hardware_measurement
-        span.set_attribute("custom.hardware.max_ram_usage_mb", hw.max_ram_usage_mb)
-        span.set_attribute("custom.hardware.avg_cpu_utilization_pct", hw.avg_cpu_utilization_pct)
-        span.set_attribute("custom.hardware.swap_in_bytes", hw.swap_in_bytes)
-        span.set_attribute("custom.hardware.swap_out_bytes", hw.swap_out_bytes)
-        if hw.peak_cpu_temp_c is not None:
-            span.set_attribute("custom.hardware.peak_cpu_temp_c", hw.peak_cpu_temp_c)
+            # Score the trace with evaluation metrics (appear as native Langfuse scores)
+            root_span.score(name="abstention", value=is_abstention, data_type="BOOLEAN")
+            if result_recall is not None:
+                root_span.score(name="recall_at_k", value=result_recall, data_type="NUMERIC")
+            if result_precision is not None:
+                root_span.score(name="precision_at_k", value=result_precision, data_type="NUMERIC")
+            if result_mrr is not None:
+                root_span.score(name="mrr", value=result_mrr, data_type="NUMERIC")
 
-        return EvaluationResult(
-            run_id=run_config.run_id,
-            claim_id=entry.id,
-            ground_truth=entry,
-            response=gen_response,
-            recall_at_k=result_recall,
-            precision_at_k=result_precision,
-            mrr=result_mrr,
-            is_abstention=is_abstention,
-        )
+            return EvaluationResult(
+                run_id=run_config.run_id,
+                claim_id=entry.id,
+                ground_truth=entry,
+                response=gen_response,
+                recall_at_k=result_recall,
+                precision_at_k=result_precision,
+                mrr=result_mrr,
+                is_abstention=is_abstention,
+            )
 
 
 async def run_evaluation(
     orchestrator: Orchestrator,
     run_config: RunConfig,
     entries: list[GroundTruthEntry],
-    tracer: trace.Tracer,
+    langfuse: Langfuse,
     show_progress: bool = True,
 ) -> list[EvaluationResult]:
     """Run evaluation for a single run config across all entries.
 
-    Uses active OTEL tracing - spans are created during evaluation and
-    exported automatically via the configured BatchSpanProcessor.
+    Uses Langfuse SDK tracing - spans are created during evaluation and
+    flushed to Langfuse after all evaluations complete.
 
     Args:
         orchestrator: The orchestrator instance with HTTP client.
         run_config: Run configuration to evaluate.
         entries: List of ground truth entries.
-        tracer: OTEL tracer for span creation.
+        langfuse: Langfuse client for tracing.
         show_progress: Whether to show progress output.
 
     Returns:
@@ -282,10 +288,9 @@ async def run_evaluation(
                 orchestrator._client,
                 entry,
                 run_config,
-                tracer,
+                langfuse,
             )
             results.append(result)
-            # Spans are exported automatically by BatchSpanProcessor
         except httpx.HTTPStatusError as e:
             logger.error(
                 "HTTP error for claim %s: %s %s",
@@ -366,8 +371,8 @@ async def _run(
         entries = load_ground_truth(validation.ground_truth_path)
         logger.info("Loaded %d ground truth entries", len(entries))
 
-        # Set up active tracing (spans exported via BatchSpanProcessor)
-        tracer = setup_tracing()
+        # Initialize Langfuse client for tracing
+        langfuse = get_langfuse_client()
 
         try:
             for run_config in run_configs:
@@ -377,7 +382,7 @@ async def _run(
                     orchestrator,
                     run_config,
                     entries,
-                    tracer,
+                    langfuse,
                     show_progress=not quiet,
                 )
 
@@ -409,7 +414,7 @@ async def _run(
                     len(results),
                 )
         finally:
-            shutdown_tracing()
+            shutdown_tracing(langfuse)
 
     return 0
 
