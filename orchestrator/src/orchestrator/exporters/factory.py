@@ -6,10 +6,9 @@ from typing import Union
 
 from orchestrator.config import ObservabilityConfig
 from orchestrator.exporters.jsonl import JSONLSpanExporter
-from orchestrator.exporters.langfuse_exporter import LangfuseExporter
 
 
-def create_exporter(config: ObservabilityConfig) -> Union[JSONLSpanExporter, LangfuseExporter]:
+def create_exporter(config: ObservabilityConfig) -> Union[JSONLSpanExporter]:
     """Create an exporter based on observability config.
 
     Args:
@@ -18,6 +17,7 @@ def create_exporter(config: ObservabilityConfig) -> Union[JSONLSpanExporter, Lan
     Returns:
         Configured exporter instance.
     """
+    # TODO: logic needs to be corrected, no single exporter, but active tracing. Relevant when doing local exporting.
     if config.langfuse:
-        return LangfuseExporter()
+        return True
     return JSONLSpanExporter(config.output_jsonl)

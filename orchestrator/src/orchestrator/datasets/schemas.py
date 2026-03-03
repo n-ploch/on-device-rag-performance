@@ -64,6 +64,10 @@ class GroundTruthEntry(BaseModel):
         default=None,
         description="Ground truth label (e.g., 'SUPPORT', 'CONTRADICT', 'NOT_ENOUGH_INFO')",
     )
+    expected_response: str | None = Field(
+        default=None,
+        description="Expected text response for the input (ground truth for generation)",
+    )
     supporting_documents: list[str] = Field(
         default_factory=list,
         description="Document IDs that contain evidence for this sample",

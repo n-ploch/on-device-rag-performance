@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -87,6 +88,19 @@ class LlamaServerGenerator:
             payload["stop"] = stop
 
         response = self._client.post("/v1/completions", json=payload)
+
+        # llama-server returns 503 while loading the model; wait and retry
+        retries = 0
+        while response.status_code == 503 and retries < 10:
+            wait = min(2**retries, 30)
+            logger.info(
+                "llama-server not ready (503 Loading model), retrying in %ds (attempt %d/10)...",
+                wait,
+                retries + 1,
+            )
+            time.sleep(wait)
+            response = self._client.post("/v1/completions", json=payload)
+            retries += 1
 
         if response.status_code != 200:
             raise RuntimeError(
