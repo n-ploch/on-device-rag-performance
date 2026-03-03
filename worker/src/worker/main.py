@@ -280,11 +280,11 @@ def create_app() -> FastAPI:
                 # Enrich generation span with llama measurements
                 generation_span.set_attribute("gen_ai.prompt", request.input_prompt)
                 generation_span.set_attribute("gen_ai.completion", gen_result.text)
-                generation_span.set_attribute("retrieval_context", retrieval_context)
+                generation_span.set_attribute("custom.generation.retrieval_context", retrieval_context)
 
                 # Include expected response (ground truth) if provided
                 if request.expected_response:
-                    generation_span.set_attribute("ground_truth", request.expected_response)
+                    generation_span.set_attribute("custom.generation.ground_truth", request.expected_response)
 
                 # Latency measurements from llama.cpp
                 ttft_ms = gen_result.prompt_ms + gen_result.predicted_per_token_ms
