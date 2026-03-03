@@ -38,9 +38,7 @@ def detect_abstention(output: str) -> bool:
         return True
 
     abstention_patterns = [
-        "i don't know",
-        "insufficient information",
-        "cannot determine",
+        "insufficient information"
     ]
     return any(pattern in text for pattern in abstention_patterns)
 
