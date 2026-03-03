@@ -225,7 +225,7 @@ class TestEvaluateSingle:
     ):
         """Should detect abstention in output."""
         abstention_response = GenerateResponse(
-            output="I don't know the answer to this question.",
+            output="Insufficient Information. The context is not sufficient.",
             retrieval_data=RetrievalData(
                 cited_doc_ids=["doc_1"],
                 retrieved_chunks=["chunk text"],

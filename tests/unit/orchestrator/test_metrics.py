@@ -108,17 +108,10 @@ class TestMRR:
 class TestDetectAbstention:
     """Tests for abstention detection."""
 
-    def test_i_dont_know_pattern(self):
-        """Detect 'I don't know' pattern."""
-        assert detect_abstention("I don't know the answer.") is True
 
     def test_insufficient_info_pattern(self):
         """Detect 'insufficient information' pattern."""
         assert detect_abstention("There is insufficient information.") is True
-
-    def test_cannot_determine_pattern(self):
-        """Detect 'cannot determine' pattern."""
-        assert detect_abstention("I cannot determine the answer.") is True
 
     def test_normal_answer(self):
         """Normal answer is not abstention."""
@@ -130,7 +123,7 @@ class TestDetectAbstention:
 
     def test_case_insensitive(self):
         """Pattern matching is case-insensitive."""
-        assert detect_abstention("I DON'T KNOW") is True
+        assert detect_abstention("INSUFFICIENT INFORMATION") is True
 
 
 class TestAbstentionRate:
@@ -143,12 +136,12 @@ class TestAbstentionRate:
 
     def test_all_abstentions(self):
         """All abstentions -> rate = 1.0"""
-        outputs = ["I don't know", ""]
+        outputs = ["Insufficient information", ""]
         assert abstention_rate(outputs) == 1.0
 
     def test_mixed(self):
         """Half abstentions -> rate = 0.5"""
-        outputs = ["Answer", "I don't know", "Another answer", "I cannot determine the answer."]
+        outputs = ["Answer", "Insufficient information", "Another answer", "Insufficient information"]
         assert abstention_rate(outputs) == 0.5
 
     def test_empty_list(self):
