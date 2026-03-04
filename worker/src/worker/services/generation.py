@@ -107,7 +107,7 @@ class GenerationService:
     def _format_prompt_with_context(self, query: str, context: str) -> str:
         """Format prompt with retrieved context."""
         return f"""<s>[INST] Use the following context to answer the question. If the context doesn't contain enough information, start your answer with "Insufficient information", followed by a short explanation.
-                Start directly by answering the question. Be concise: Distill the relevant information from the context to give your answer.
+                Start directly by answering the question. Be concise.
                 Context:
                 {context}
 
