@@ -161,6 +161,7 @@ async def evaluate_single(
         "rag.evaluation",
         attributes={
             "run_id": run_config.run_id,
+            "langfuse.session.id": run_config.run_id,
             "claim_id": entry.id,
             "gen_ai.prompt": entry.input,
             "ground_truth": entry.expected_response or "",
