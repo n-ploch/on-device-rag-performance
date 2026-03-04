@@ -15,7 +15,7 @@ observability:
   print_logs: true  # Whether to print logs to terminal
 
 run_configs:
-  - run_id: "mistral_q4_baseline_002"
+  - run_id: "mistral_q4_baseline_k10_001"
     retrieval:
       dataset_id: *dataset_id
       model: "keisuke-miyako/multilingual-e5-small-gguf-q4_k_m"
@@ -25,7 +25,7 @@ run_configs:
         strategy: "fixed"
         chunk_size: 500
         chunk_overlap: 64
-      k: 3
+      k: 10
     generation:
       model: "mistralai/Ministral-3-3B-Instruct-2512-GGUF"
       quantization: "q4_k_m"
