@@ -20,7 +20,7 @@ import httpx
 from orchestrator.config import EvalConfig
 from orchestrator.models.loader import ModelLoaderError, ensure_models
 from shared_types.dataset_loader import DatasetLoader, get_dataset_dir
-from shared_types.schemas import LoadModelsRequest, RunConfig
+from shared_types.schemas import LoadModelsRequest, RunConfig, ServerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +292,14 @@ class Orchestrator:
             embedder_quantization=run_config.retrieval.quantization,
             generator_repo=run_config.generation.model,
             generator_quantization=run_config.generation.quantization,
+            embedder_config=ServerConfig(
+                n_ctx=512,
+                parallel_slots=1
+            ),
+            generator_config=ServerConfig(
+                n_ctx=2048,
+                parallel_slots=1
+            ),
         )
 
         logger.info(
