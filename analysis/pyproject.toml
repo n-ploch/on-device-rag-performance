@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-analysis"
+version = "0.1.0"
+description = "Langfuse metrics export and analysis tools for on-device RAG evaluation"
+requires-python = ">=3.11"
+dependencies = [
+    "langfuse>=3.0",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "httpx>=0.28",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "jupyterlab>=4.0",
+    "matplotlib>=3.8",
+]
+
+[tool.setuptools]
+# No packages — scripts are imported directly from analysis/
+py-modules = ["langfuse_export"]
