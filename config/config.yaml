@@ -15,7 +15,7 @@ observability:
   print_logs: true  # Whether to print logs to terminal
 
 run_configs:
-  - run_id: "mistral_q4_first_baseline"
+  - run_id: "mistral_q4_baseline_002"
     retrieval:
       dataset_id: *dataset_id
       model: "keisuke-miyako/multilingual-e5-small-gguf-q4_k_m"
