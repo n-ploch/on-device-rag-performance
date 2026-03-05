@@ -98,16 +98,20 @@ class GenerationService:
 
     def _format_prompt_no_context(self, query: str) -> str:
         """Format prompt when no context is available."""
-        return f"""Use the following pieces of context to answer the question.
+        return f"""<s>[INST] Use the following pieces of context to answer the question.
                 Context:
                 <No context available>
 
-                Question: {query}"""
+                Question: {query}
+                
+                Answer: [/INST]"""
 
     def _format_prompt_with_context(self, query: str, context: str) -> str:
         """Format prompt with retrieved context."""
-        return f"""Use the following pieces of context to answer the question.
+        return f"""<s>[INST] Use the following pieces of context to answer the question.
                 Context:
                 {context}
 
-                Question: {query}"""
+                Question: {query}
+                
+                Answer: [/INST]"""
