@@ -55,6 +55,7 @@ class RunConfig(BaseModel):
     run_id: str
     retrieval: RetrievalConfig
     generation: GenerationConfig
+    limit: int | None = Field(default=None, gt=0, description="Max ground truth entries to evaluate. None = all.")
 
 
 class GenerateRequest(BaseModel):

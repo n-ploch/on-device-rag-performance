@@ -374,10 +374,14 @@ async def _run(
             for run_config in run_configs:
                 logger.info("Starting evaluation: %s", run_config.run_id)
 
+                run_entries = entries[: run_config.limit] if run_config.limit is not None else entries
+                if run_config.limit is not None:
+                    logger.info("Limiting to %d/%d entries", len(run_entries), len(entries))
+
                 results = await run_evaluation(
                     orchestrator,
                     run_config,
-                    entries,
+                    run_entries,
                     tracer,
                     show_progress=not quiet,
                 )
