@@ -183,6 +183,7 @@ class TestEvaluateSingle:
             sample_ground_truth_entry,
             sample_run_config,
             mock_tracer,
+            "test_run_abc12345",
         )
 
         assert result.run_id == "test_run"
@@ -210,6 +211,7 @@ class TestEvaluateSingle:
             sample_ground_truth_entry,
             sample_run_config,
             mock_tracer,
+            "test_run_abc12345",
         )
 
         # doc_1 is in supporting_documents and retrieved (at position 0)
@@ -258,6 +260,7 @@ class TestEvaluateSingle:
             sample_ground_truth_entry,
             sample_run_config,
             mock_tracer,
+            "test_run_abc12345",
         )
 
         assert result.is_abstention is True
@@ -302,7 +305,7 @@ class TestEvaluateSingle:
         mock_response.raise_for_status = MagicMock()
         mock_client.post.return_value = mock_response
 
-        result = await evaluate_single(mock_client, entry, sample_run_config, mock_tracer)
+        result = await evaluate_single(mock_client, entry, sample_run_config, mock_tracer, "test_run_abc12345")
 
         # No supporting documents means metrics should be None
         assert result.recall_at_k is None
