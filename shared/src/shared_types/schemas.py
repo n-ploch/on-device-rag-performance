@@ -73,12 +73,6 @@ class RetrievalData(BaseModel):
     cited_doc_ids: list[str]
     retrieved_chunks: list[str]
 
-    @model_validator(mode="after")
-    def _validate_lengths(self) -> "RetrievalData":
-        if len(self.cited_doc_ids) != len(self.retrieved_chunks):
-            raise ValueError("cited_doc_ids and retrieved_chunks must have equal length")
-        return self
-
 
 class InferenceMeasurement(BaseModel):
     """Inference latency and token statistics."""
