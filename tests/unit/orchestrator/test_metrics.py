@@ -48,6 +48,29 @@ class TestRecallAtK:
         """Empty retrieved -> recall = 0.0"""
         assert recall_at_k([], {"d1"}, k=3) == 0.0
 
+    def test_duplicate_ids_within_top_k_counted_once(self):
+        """Duplicate doc in top-k must not double-count as a hit.
+
+        Without dedup: top_k=["d1","d1"] → hits=2, recall=2/2=1.0 (wrong).
+        With dedup:    top_k=["d1"]      → hits=1, recall=1/2=0.5 (correct).
+        """
+        assert recall_at_k(["d1", "d1"], {"d1", "d2"}, k=2) == 0.5
+
+    def test_duplicate_ids_do_not_pad_top_k(self):
+        """Dedup before slicing — a repeated doc must not steal a slot from a later unique doc.
+
+        Without dedup: top_k=["d1","d1"], d2 never considered → hits=1, recall=1/2=0.5.
+        With dedup:    unique=["d1","d2"], top_k=["d1","d2"] → hits=2, recall=2/2=1.0.
+        """
+        assert recall_at_k(["d1", "d1", "d2"], {"d1", "d2"}, k=2) == 1.0
+
+    def test_all_duplicates_single_relevant(self):
+        """All retrieved slots are the same doc; only one unique doc available.
+
+        top_k (after dedup, k=3) = ["d1"] → hits=1, recall=1/2=0.5.
+        """
+        assert recall_at_k(["d1", "d1", "d1"], {"d1", "d2"}, k=3) == 0.5
+
 
 class TestPrecisionAtK:
     """Tests for precision@k metric."""
@@ -71,6 +94,31 @@ class TestPrecisionAtK:
     def test_empty_retrieved(self):
         """Empty retrieved -> precision = 0.0"""
         assert precision_at_k([], {"d1"}, k=3) == 0.0
+
+    def test_duplicate_ids_do_not_inflate_hits(self):
+        """A repeated relevant doc must not be counted as two hits.
+
+        Without dedup: top_k=["d1","d1"] → hits=2, precision=2/2=1.0 (wrong).
+        With dedup:    top_k=["d1"]      → hits=1, precision=1/1=1.0 (correct, but denominator matters).
+        """
+        # d1 repeated twice in top-2; only 1 unique relevant doc → precision = 1/1
+        assert precision_at_k(["d1", "d1"], {"d1"}, k=2) == 1.0
+
+    def test_duplicate_ids_denominator_is_unique_count(self):
+        """Denominator must reflect unique docs, not raw slice length.
+
+        Without dedup: top_k=["d1","d1"] → denominator=2, precision=1/2=0.5 (wrong).
+        With dedup:    top_k=["d1"]      → denominator=1, precision=1/1=1.0 (correct).
+        """
+        assert precision_at_k(["d1", "d1"], {"d1", "d2"}, k=2) == 1.0
+
+    def test_duplicate_ids_do_not_pad_top_k(self):
+        """Dedup before slicing — repeated doc must not block a later unique relevant doc.
+
+        Without dedup: top_k=["d1","d1"], d2 unseen → hits=0 (d2 not considered).
+        With dedup:    unique=["d1","d2"], top_k=["d1","d2"] → hits=1, precision=1/2=0.5.
+        """
+        assert precision_at_k(["d1", "d1", "d2"], {"d2"}, k=2) == 0.5
 
 
 class TestMRR:
