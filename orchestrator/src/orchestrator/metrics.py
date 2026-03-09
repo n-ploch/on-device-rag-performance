@@ -4,19 +4,29 @@ from __future__ import annotations
 
 
 def recall_at_k(retrieved: list[str], relevant: set[str], k: int) -> float:
+    """Recall@k: fraction of relevant docs found in the top-k retrieved.
+
+    Duplicate doc IDs in `retrieved` are deduplicated before slicing to k,
+    so repeated chunks from the same document do not inflate hit counts.
+    """
     if k <= 0:
         raise ValueError("k must be > 0")
     if not relevant:
         return 0.0
-    top_k = retrieved[:k]
+    top_k = list(dict.fromkeys(retrieved))[:k]
     hits = sum(1 for doc_id in top_k if doc_id in relevant)
     return hits / len(relevant)
 
 
 def precision_at_k(retrieved: list[str], relevant: set[str], k: int) -> float:
+    """Precision@k: fraction of top-k retrieved docs that are relevant.
+
+    Duplicate doc IDs in `retrieved` are deduplicated before slicing to k,
+    so repeated chunks from the same document do not inflate the denominator.
+    """
     if k <= 0:
         raise ValueError("k must be > 0")
-    top_k = retrieved[:k]
+    top_k = list(dict.fromkeys(retrieved))[:k]
     if not top_k:
         return 0.0
     hits = sum(1 for doc_id in top_k if doc_id in relevant)
