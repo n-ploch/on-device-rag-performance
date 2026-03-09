@@ -43,6 +43,7 @@ def mrr(retrieved: list[str], relevant: set[str]) -> float:
 
 
 def detect_abstention(output: str) -> bool:
+    '''Currently not in use, must think how to use, with ragbench (no labels) it lowers answer correctness if forcing the generator to answer accordingly'''
     text = output.strip().lower()
     if not text:
         return True
