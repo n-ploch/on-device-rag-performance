@@ -144,6 +144,22 @@ def fetch_traces(
     return traces
 
 
+def already_exported(output_dir: str | Path) -> set[str]:
+    """Return the set of session IDs that already have a parquet file in *output_dir*.
+
+    Parses filenames of the form ``YYYY-MM-DD_HH-MM_langfuse_export_<session_id>.parquet``
+    and extracts the session ID part.
+    """
+    marker = "_langfuse_export_"
+    exported: set[str] = set()
+    for p in Path(output_dir).glob("*_langfuse_export_*.parquet"):
+        name = p.stem  # strip .parquet
+        idx = name.find(marker)
+        if idx != -1:
+            exported.add(name[idx + len(marker):])
+    return exported
+
+
 def resolve_session_ids(
     spec: str,
     from_timestamp: datetime.datetime | None = None,
@@ -266,6 +282,14 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", default="local/metric-export")
     p.add_argument("--from", dest="from_date", metavar="YYYY-MM-DD")
     p.add_argument("--to", dest="to_date", metavar="YYYY-MM-DD")
+    p.add_argument(
+        "--skip-existing", action="store_true",
+        help=(
+            "Skip any session whose ID already appears in a parquet filename "
+            "inside --output-dir. Useful when re-running a glob export to "
+            "pick up only new sessions."
+        ),
+    )
     return p.parse_args()
 
 
@@ -286,6 +310,17 @@ def main() -> None:
     if not session_ids:
         print("No matching sessions found.")
         return
+
+    if args.skip_existing:
+        done = already_exported(args.output_dir)
+        before = len(session_ids)
+        session_ids = [sid for sid in session_ids if sid not in done]
+        skipped = before - len(session_ids)
+        if skipped:
+            print(f"Skipping {skipped} already-exported session(s).")
+        if not session_ids:
+            print("All sessions already exported.")
+            return
 
     for i, sid in enumerate(session_ids, 1):
         if len(session_ids) > 1:
