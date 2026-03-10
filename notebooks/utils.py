@@ -576,6 +576,8 @@ def plot_stats_line(
     group_by: str = "session_id",
     group_order: list[str] | None = None,
     stat: str = "mean",
+    show_band: bool = False,
+    band_percentiles: tuple[float, float] = (25, 75),
     figsize_per_col: tuple[int, int] = (5, 4),
 ) -> None:
     """Line plot of a statistic across groups, one subplot per metric.
@@ -584,12 +586,15 @@ def plot_stats_line(
     marker at every data point.
 
     Args:
-        df:             DataFrame with the *group_by* column.
-        cols:           Metric columns to plot.
-        group_by:       Column to group by.
-        group_order:    Explicit group order (x-axis sequence).
-        stat:           Aggregation: ``"mean"``, ``"std"``, or ``"median"``.
-        figsize_per_col: ``(width, height)`` per subplot.
+        df:               DataFrame with the *group_by* column.
+        cols:             Metric columns to plot.
+        group_by:         Column to group by.
+        group_order:      Explicit group order (x-axis sequence).
+        stat:             Aggregation: ``"mean"``, ``"std"``, or ``"median"``.
+        show_band:        When True, draw a shaded band between *band_percentiles*.
+        band_percentiles: ``(lower, upper)`` percentile pair for the band.
+                          Defaults to ``(25, 75)``.
+        figsize_per_col:  ``(width, height)`` per subplot.
     """
     cols = _present(df, cols)
     if not cols:
@@ -597,17 +602,29 @@ def plot_stats_line(
         return
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
     agg_fn = {"mean": "mean", "std": "std", "median": "median"}[stat]
-    agg = df[df[group_by].isin(groups)].groupby(group_by)[cols].agg(agg_fn).reindex(groups)
+    subset = df[df[group_by].isin(groups)]
+    agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
+
+    lo_agg = hi_agg = None
+    if show_band:
+        lo_q, hi_q = band_percentiles[0] / 100, band_percentiles[1] / 100
+        lo_agg = subset.groupby(group_by)[cols].quantile(lo_q).reindex(groups)
+        hi_agg = subset.groupby(group_by)[cols].quantile(hi_q).reindex(groups)
 
     n = len(cols)
     fig, axes = plt.subplots(1, n, figsize=(figsize_per_col[0] * n, figsize_per_col[1]))
     if n == 1:
         axes = [axes]
 
-    x = range(len(groups))
+    x = list(range(len(groups)))
     for ax, col in zip(axes, agg.columns):
-        ax.plot(x, agg[col].values, marker="o", linestyle="-")
-        ax.set_xticks(list(x))
+        line, = ax.plot(x, agg[col].values, marker="o", linestyle="-")
+        if show_band:
+            ax.fill_between(x, lo_agg[col].values, hi_agg[col].values,
+                            alpha=0.2, color=line.get_color(),
+                            label=f"p{int(band_percentiles[0])}–p{int(band_percentiles[1])}")
+            ax.legend(fontsize=7)
+        ax.set_xticks(x)
         ax.set_xticklabels(groups, rotation=45, ha="right", fontsize=8)
         ax.set_title(f"{stat}({col})", fontsize=9)
         ax.set_ylabel(col)
@@ -624,21 +641,27 @@ def plot_stats_multi_line(
     stat: str = "mean",
     figsize: tuple[int, int] = (10, 5),
     normalize: bool = False,
+    show_band: bool = False,
+    band_percentiles: tuple[float, float] = (25, 75),
 ) -> None:
     """Line plot with all metrics overlaid in a single axes, one line per metric.
 
     Useful for comparing the trend of several metrics across groups at once.
 
     Args:
-        df:          DataFrame with the *group_by* column.
-        cols:        Metric columns — each becomes one labelled line.
-        group_by:    Column to group by (x-axis ticks).
-        group_order: Explicit x-axis sequence. Defaults to sorted unique values.
-        stat:        Aggregation: ``"mean"``, ``"std"``, or ``"median"``.
-        figsize:     Figure size.
-        normalize:   When True, each metric is min-max scaled to [0, 1] so
-                     metrics with very different magnitudes can be compared
-                     on the same y-axis.
+        df:               DataFrame with the *group_by* column.
+        cols:             Metric columns — each becomes one labelled line.
+        group_by:         Column to group by (x-axis ticks).
+        group_order:      Explicit x-axis sequence. Defaults to sorted unique values.
+        stat:             Aggregation: ``"mean"``, ``"std"``, or ``"median"``.
+        figsize:          Figure size.
+        normalize:        When True, each metric is min-max scaled to [0, 1] so
+                          metrics with very different magnitudes can be compared
+                          on the same y-axis.
+        show_band:        When True, draw a shaded band between *band_percentiles*
+                          for each metric (same colour, lower opacity).
+        band_percentiles: ``(lower, upper)`` percentile pair for the band.
+                          Defaults to ``(25, 75)``.
     """
     cols = _present(df, cols)
     if not cols:
@@ -646,21 +669,42 @@ def plot_stats_multi_line(
         return
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
     agg_fn = {"mean": "mean", "std": "std", "median": "median"}[stat]
-    agg = df[df[group_by].isin(groups)].groupby(group_by)[cols].agg(agg_fn).reindex(groups)
+    subset = df[df[group_by].isin(groups)]
+    agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
+
+    lo_agg = hi_agg = None
+    if show_band:
+        lo_q, hi_q = band_percentiles[0] / 100, band_percentiles[1] / 100
+        lo_agg = subset.groupby(group_by)[cols].quantile(lo_q).reindex(groups)
+        hi_agg = subset.groupby(group_by)[cols].quantile(hi_q).reindex(groups)
 
     if normalize:
-        agg = (agg - agg.min()) / (agg.max() - agg.min()).replace(0, 1)
+        col_min = agg.min()
+        col_max = agg.max()
+        scale = (col_max - col_min).replace(0, 1)
+        agg = (agg - col_min) / scale
+        if show_band:
+            lo_agg = (lo_agg - col_min) / scale
+            hi_agg = (hi_agg - col_min) / scale
 
     fig, ax = plt.subplots(figsize=figsize)
-    x = range(len(groups))
+    x = list(range(len(groups)))
     for col in agg.columns:
-        ax.plot(x, agg[col].values, marker="o", linestyle="-", label=col)
+        line, = ax.plot(x, agg[col].values, marker="o", linestyle="-", label=col)
+        if show_band:
+            ax.fill_between(x, lo_agg[col].values, hi_agg[col].values,
+                            alpha=0.15, color=line.get_color())
 
-    ax.set_xticks(list(x))
+    ax.set_xticks(x)
     ax.set_xticklabels(groups, rotation=45, ha="right", fontsize=8)
     ylabel = f"{stat} (normalized)" if normalize else stat
     ax.set_ylabel(ylabel)
-    ax.set_title(f"{stat} of metrics by {group_by}" + (" (normalized)" if normalize else ""))
+    title = f"{stat} of metrics by {group_by}"
+    if normalize:
+        title += " (normalized)"
+    if show_band:
+        title += f"  [band: p{int(band_percentiles[0])}–p{int(band_percentiles[1])}]"
+    ax.set_title(title)
     ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
     plt.tight_layout()
     plt.show()
