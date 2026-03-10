@@ -1,4 +1,4 @@
-"""Export rag.evaluation metrics and Langfuse scores to a single Parquet file.
+"""Export rag.evaluation metrics and Langfuse scores to Parquet files.
 
 Uses trace.list(session_id=...) + trace.get() to fetch all spans and scores
 per trace, properly filtered by session_id (= run_id).
@@ -8,7 +8,15 @@ observations (rag.retrieval, rag.generation) and scores in one call —
 no separate fetches or joins needed.
 
 Usage:
+    # single session
     python analysis/langfuse_export.py --session-id mistral_q4_baseline_001
+
+    # multiple sessions (comma-separated) — one Parquet file per session
+    python analysis/langfuse_export.py --session-id id1,id2,id3
+
+    # glob pattern — lists all sessions, matches client-side, one file per match
+    python analysis/langfuse_export.py --session-id "*_q4_*"
+
     python analysis/langfuse_export.py --session-id my_run --from 2026-01-01
 
 Reads credentials from .env: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL.
@@ -19,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import fnmatch
 import json
 from pathlib import Path
 from typing import Any
@@ -135,6 +144,46 @@ def fetch_traces(
     return traces
 
 
+def resolve_session_ids(
+    spec: str,
+    from_timestamp: datetime.datetime | None = None,
+    to_timestamp: datetime.datetime | None = None,
+) -> list[str]:
+    """Expand a session-id spec into a list of concrete session IDs.
+
+    Accepts:
+      - A single ID with no wildcards → ``["my_session"]``
+      - Comma-separated IDs          → ``["id1", "id2"]``
+      - A glob pattern (contains ``*`` or ``?``) → lists all sessions from
+        Langfuse and returns those whose ID matches via :func:`fnmatch.fnmatch`.
+    """
+    # Glob pattern — must list all sessions and filter client-side
+    if "*" in spec or "?" in spec:
+        print(f"Resolving glob pattern '{spec}' against available sessions...")
+        lf = get_client()
+        all_ids: list[str] = []
+        page = 1
+        while True:
+            resp = lf.api.sessions.list(
+                from_timestamp=from_timestamp,
+                to_timestamp=to_timestamp,
+                page=page,
+                limit=50,
+            )
+            if not resp.data:
+                break
+            all_ids.extend(s.id for s in resp.data)
+            if page >= (resp.meta.total_pages or 1):
+                break
+            page += 1
+        matched = [sid for sid in all_ids if fnmatch.fnmatch(sid, spec)]
+        print(f"  {len(matched)}/{len(all_ids)} sessions matched")
+        return matched
+
+    # Comma-separated list (or plain single ID)
+    return [s.strip() for s in spec.split(",") if s.strip()]
+
+
 # ── DataFrame assembly ────────────────────────────────────────────────────────
 
 def trace_to_row(trace: Any) -> dict[str, Any]:
@@ -206,8 +255,14 @@ def export(
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Export Langfuse metrics to Parquet")
-    p.add_argument("--session-id", required=True,
-                   help="Langfuse session ID (= run_id) to export")
+    p.add_argument(
+        "--session-id", required=True,
+        help=(
+            "Session ID(s) to export. Accepts: a single ID, a comma-separated "
+            "list of IDs, or a glob pattern (e.g. '*_q4_*') which is matched "
+            "against all available sessions."
+        ),
+    )
     p.add_argument("--output-dir", default="local/metric-export")
     p.add_argument("--from", dest="from_date", metavar="YYYY-MM-DD")
     p.add_argument("--to", dest="to_date", metavar="YYYY-MM-DD")
@@ -227,8 +282,16 @@ def main() -> None:
         if args.to_date else None
     )
 
-    export(session_id=args.session_id, output_dir=args.output_dir,
-           from_timestamp=from_ts, to_timestamp=to_ts)
+    session_ids = resolve_session_ids(args.session_id, from_ts, to_ts)
+    if not session_ids:
+        print("No matching sessions found.")
+        return
+
+    for i, sid in enumerate(session_ids, 1):
+        if len(session_ids) > 1:
+            print(f"\n[{i}/{len(session_ids)}]", end=" ")
+        export(session_id=sid, output_dir=args.output_dir,
+               from_timestamp=from_ts, to_timestamp=to_ts)
 
 
 if __name__ == "__main__":
