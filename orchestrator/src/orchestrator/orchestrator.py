@@ -300,6 +300,7 @@ class Orchestrator:
                 n_ctx=2048,
                 parallel_slots=1
             ),
+            generation_config=run_config.generation,
         )
 
         logger.info(
