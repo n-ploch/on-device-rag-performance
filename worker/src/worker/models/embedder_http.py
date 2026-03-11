@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -36,6 +37,27 @@ class LlamaServerEmbedder:
         self._dimensions = dimensions
         logger.info("Initialized embedder client for %s", self._server_url)
 
+    def _post_with_retry(self, path: str, payload: dict) -> httpx.Response:
+        """POST to the embedding server with 503 retry + exponential backoff.
+
+        llama-server returns 503 while the model is still loading. Retry up to
+        10 times with exponential backoff (1 s, 2 s, 4 s … capped at 30 s),
+        matching the retry strategy used by the generator client.
+        """
+        response = self._client.post(path, json=payload)
+        retries = 0
+        while response.status_code == 503 and retries < 10:
+            wait = min(2**retries, 30)
+            logger.info(
+                "Embedding server not ready (503 Loading model), retrying in %ds (attempt %d/10)...",
+                wait,
+                retries + 1,
+            )
+            time.sleep(wait)
+            response = self._client.post(path, json=payload)
+            retries += 1
+        return response
+
     def embed(self, text: str) -> list[float]:
         """Generate embedding vector for a single text string.
 
@@ -50,13 +72,7 @@ class LlamaServerEmbedder:
         """
         logger.debug("Embedding text of length %d", len(text))
 
-        response = self._client.post(
-            "/v1/embeddings",
-            json={
-                "input": text,
-                "model": "embedding",
-            },
-        )
+        response = self._post_with_retry("/v1/embeddings", {"input": text, "model": "embedding"})
 
         if response.status_code != 200:
             raise RuntimeError(
@@ -92,13 +108,7 @@ class LlamaServerEmbedder:
 
         logger.debug("Batch embedding %d texts", len(texts))
 
-        response = self._client.post(
-            "/v1/embeddings",
-            json={
-                "input": texts,
-                "model": "embedding",
-            },
-        )
+        response = self._post_with_retry("/v1/embeddings", {"input": texts, "model": "embedding"})
 
         if response.status_code != 200:
             raise RuntimeError(

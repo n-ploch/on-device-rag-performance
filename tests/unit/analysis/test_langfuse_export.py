@@ -134,88 +134,101 @@ class TestExtractAttrs:
 # ── to_dataframe ──────────────────────────────────────────────────────────────
 
 
-def _make_obs(
-    obs_id: str,
-    trace_id: str,
-    latency: float,
-    attrs: dict,
-    start_time=None,
-    end_time=None,
-):
-    """Return a mock observation object matching the FernLangfuse v1 shape."""
+def _make_obs(name: str, obs_id: str, latency: float, attrs: dict, start_time=None, end_time=None):
+    """Return a mock child observation (e.g. rag.evaluation, rag.generation)."""
     meta = {"attributes": attrs, "resourceAttributes": {}, "scope": {}}
-    ns = types.SimpleNamespace(
+    return types.SimpleNamespace(
         id=obs_id,
-        trace_id=trace_id,
+        name=name,
         start_time=start_time,
         end_time=end_time,
         latency=latency,
         metadata=meta,
     )
-    return ns
+
+
+def _make_score(name: str, value: float):
+    return types.SimpleNamespace(name=name, value=value)
+
+
+def _make_trace(
+    trace_id: str,
+    session_id: str,
+    root_attrs: dict,
+    latency: float = 50.0,
+    scores: list | None = None,
+    extra_observations: list | None = None,
+):
+    """Return a mock TraceWithFullDetails-like object."""
+    root_obs = _make_obs("rag.evaluation", f"obs_{trace_id}", latency, root_attrs)
+    observations = [root_obs] + (extra_observations or [])
+    return types.SimpleNamespace(
+        id=trace_id,
+        session_id=session_id,
+        timestamp=None,
+        observations=observations,
+        scores=scores or [],
+    )
 
 
 class TestToDataframe:
-    def test_empty_observations_returns_empty_df(self):
-        df = to_dataframe([], [])
+    def test_empty_traces_returns_empty_df(self):
+        df = to_dataframe([])
         assert isinstance(df, pd.DataFrame)
         assert df.empty
 
-    def test_single_observation_no_scores(self):
-        obs = _make_obs("o1", "t1", 123.0, {"run_id": "r1", "custom.metrics.recall_at_k": "0.5"})
-        df = to_dataframe([obs], [])
+    def test_single_trace_no_scores(self):
+        trace = _make_trace(
+            "t1", "session_1",
+            {"run_id": "r1", "custom.metrics.recall_at_k": "0.5"},
+            latency=0.123,  # Langfuse returns latency in seconds; production code multiplies by 1000
+        )
+        df = to_dataframe([trace])
         assert len(df) == 1
         assert df.iloc[0]["trace_id"] == "t1"
-        assert df.iloc[0]["latency_ms"] == 123.0
+        assert df.iloc[0]["latency_ms"] == pytest.approx(123.0)
         assert df.iloc[0]["metrics_recall_at_k"] == 0.5
 
-    def test_scores_pivoted_and_joined(self):
-        obs = _make_obs("o1", "t1", 50.0, {"run_id": "r1"})
-        scores = [
-            {"traceId": "t1", "name": "faithfulness", "value": 0.9},
-            {"traceId": "t1", "name": "relevance", "value": 0.8},
-        ]
-        df = to_dataframe([obs], scores)
+    def test_scores_pivoted(self):
+        trace = _make_trace(
+            "t1", "session_1", {"run_id": "r1"},
+            scores=[_make_score("faithfulness", 0.9), _make_score("relevance", 0.8)],
+        )
+        df = to_dataframe([trace])
         assert df.iloc[0]["score_faithfulness"] == pytest.approx(0.9)
         assert df.iloc[0]["score_relevance"] == pytest.approx(0.8)
 
-    def test_unmatched_score_trace_id_produces_nan(self):
-        obs = _make_obs("o1", "t1", 50.0, {"run_id": "r1"})
-        scores = [{"traceId": "t_other", "name": "faithfulness", "value": 1.0}]
-        df = to_dataframe([obs], scores)
-        assert "score_faithfulness" in df.columns
-        assert pd.isna(df.iloc[0]["score_faithfulness"])
+    def test_no_scores_no_score_columns(self):
+        trace = _make_trace("t1", "session_1", {"run_id": "r1"})
+        df = to_dataframe([trace])
+        assert not any(c.startswith("score_") for c in df.columns)
 
-    def test_multiple_observations_with_scores(self):
-        obs1 = _make_obs("o1", "t1", 10.0, {"run_id": "run_a"})
-        obs2 = _make_obs("o2", "t2", 20.0, {"run_id": "run_b"})
-        scores = [
-            {"traceId": "t1", "name": "faithfulness", "value": 0.7},
-            {"traceId": "t2", "name": "faithfulness", "value": 0.95},
-        ]
-        df = to_dataframe([obs1, obs2], scores)
+    def test_multiple_traces_with_scores(self):
+        t1 = _make_trace("t1", "s1", {"run_id": "run_a"}, scores=[_make_score("faithfulness", 0.7)])
+        t2 = _make_trace("t2", "s1", {"run_id": "run_b"}, scores=[_make_score("faithfulness", 0.95)])
+        df = to_dataframe([t1, t2])
         assert len(df) == 2
-        t1_row = df[df["trace_id"] == "t1"].iloc[0]
-        t2_row = df[df["trace_id"] == "t2"].iloc[0]
-        assert t1_row["score_faithfulness"] == pytest.approx(0.7)
-        assert t2_row["score_faithfulness"] == pytest.approx(0.95)
+        assert df[df["trace_id"] == "t1"].iloc[0]["score_faithfulness"] == pytest.approx(0.7)
+        assert df[df["trace_id"] == "t2"].iloc[0]["score_faithfulness"] == pytest.approx(0.95)
 
-    def test_score_missing_trace_id_skipped(self):
-        obs = _make_obs("o1", "t1", 50.0, {"run_id": "r1"})
-        scores = [
-            {"name": "faithfulness", "value": 1.0},  # no traceId
-            {"traceId": "t1", "name": "relevance", "value": 0.8},
-        ]
-        df = to_dataframe([obs], scores)
-        assert df.iloc[0]["score_relevance"] == pytest.approx(0.8)
-        assert "score_faithfulness" not in df.columns
+    def test_child_span_attrs_merged(self):
+        gen_obs = _make_obs(
+            "rag.generation", "obs_gen", 30.0,
+            {"custom.generation.tokens_per_second": "47.5"},
+        )
+        trace = _make_trace(
+            "t1", "s1", {"run_id": "r1"},
+            extra_observations=[gen_obs],
+        )
+        df = to_dataframe([trace])
+        assert df.iloc[0]["generation_tokens_per_second"] == pytest.approx(47.5)
 
     def test_drop_keys_not_in_output(self):
-        obs = _make_obs(
-            "o1", "t1", 50.0,
+        trace = _make_trace(
+            "t1", "s1",
             {"ground_truth": "secret", "retrieval_context": "ctx", "run_id": "r1"},
         )
-        df = to_dataframe([obs], [])
+        df = to_dataframe([trace])
         assert "ground_truth" not in df.columns
         assert "retrieval_context" not in df.columns
         assert df.iloc[0]["run_id"] == "r1"

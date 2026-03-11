@@ -20,7 +20,7 @@ import httpx
 from orchestrator.config import EvalConfig
 from orchestrator.models.loader import ModelLoaderError, ensure_models
 from shared_types.dataset_loader import DatasetLoader, get_dataset_dir
-from shared_types.schemas import LoadModelsRequest, RunConfig
+from shared_types.schemas import LoadModelsRequest, RunConfig, ServerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +292,14 @@ class Orchestrator:
             embedder_quantization=run_config.retrieval.quantization,
             generator_repo=run_config.generation.model,
             generator_quantization=run_config.generation.quantization,
+            embedder_config=ServerConfig(
+                n_ctx=512,
+                parallel_slots=1
+            ),
+            generator_config=ServerConfig(
+                n_ctx=2048,
+                parallel_slots=1
+            ),
         )
 
         logger.info(
@@ -439,40 +447,49 @@ class Orchestrator:
         except ModelLoaderError as e:
             raise ModelPreparationError(f"Model preparation failed: {e}") from e
 
-    async def validate_prerequisites(self) -> None:
-        """Validate all prerequisites before running evaluation.
+    async def validate_global_prerequisites(self) -> None:
+        """Validate one-time prerequisites shared across all run configs.
 
-        This checks:
-        0. Models are available (downloads missing ones)
-        1. Dataset files exist locally
-        2. Worker is healthy and models are loaded
-        3. Collections exist (or can be built)
+        Checks that models are available locally, the dataset exists, and the
+        worker process is reachable. Does NOT load worker models or build
+        collections — those are run-config-specific and handled by
+        prepare_run_config().
 
         Raises:
             ModelPreparationError: If model preparation fails.
             DatasetNotFoundError: If dataset files are missing.
-            WorkerNotReadyError: If worker is not ready.
+            WorkerNotReadyError: If worker is not reachable.
             httpx.HTTPError: If worker communication fails.
         """
-        logger.info("Validating prerequisites...")
-
-        # 0. Ensure models are available locally
+        logger.info("Validating global prerequisites...")
         self._ensure_models()
-
-        # 1. Check dataset
         self.validate_dataset()
-
-        # 2. Check worker is running
         await self.check_worker_health(require_models=False)
+        logger.info("Global prerequisites validated")
 
-        # 3. Load models on worker (using first run config)
-        first_config = self.config.run_configs[0]
-        await self.load_worker_models(first_config)
+    async def _ensure_collection(self, run_config: RunConfig) -> CollectionStatus:
+        """Ensure the collection for a single run config exists, building it if needed."""
+        status = await self.check_collection_status(run_config)
+        if not status.populated:
+            status = await self.build_collection(run_config)
+        return status
 
-        # 4. Verify models are loaded
+    async def prepare_run_config(self, run_config: RunConfig) -> None:
+        """Prepare the worker for a specific run config.
+
+        Loads the correct models on the worker, verifies they are ready, and
+        ensures the ChromaDB collection for this config exists. Must be called
+        before running evaluation for each run config.
+
+        Args:
+            run_config: The run configuration to prepare.
+
+        Raises:
+            WorkerNotReadyError: If worker is not ready after model load.
+            httpx.HTTPError: If worker communication fails.
+        """
+        logger.info("Preparing run config: %s", run_config.run_id)
+        await self.load_worker_models(run_config)
         await self.check_worker_health(require_models=True)
-
-        # 5. Ensure collections (will build if missing)
-        await self.ensure_collections()
-
-        logger.info("All prerequisites validated successfully")
+        await self._ensure_collection(run_config)
+        logger.info("Run config ready: %s", run_config.run_id)

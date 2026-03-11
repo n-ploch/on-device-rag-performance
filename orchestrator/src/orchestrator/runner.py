@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 from dotenv import load_dotenv
 
@@ -142,6 +143,7 @@ async def evaluate_single(
     entry: GroundTruthEntry,
     run_config: RunConfig,
     tracer: trace.Tracer,
+    session_id: str,
 ) -> EvaluationResult:
     """Evaluate a single ground truth entry with active tracing.
 
@@ -161,6 +163,7 @@ async def evaluate_single(
         "rag.evaluation",
         attributes={
             "run_id": run_config.run_id,
+            "langfuse.session.id": session_id,
             "claim_id": entry.id,
             "gen_ai.prompt": entry.input,
             "ground_truth": entry.expected_response or "",
@@ -250,6 +253,7 @@ async def run_evaluation(
     run_config: RunConfig,
     entries: list[GroundTruthEntry],
     tracer: trace.Tracer,
+    session_id: str,
     show_progress: bool = True,
 ) -> list[EvaluationResult]:
     """Run evaluation for a single run config across all entries.
@@ -283,6 +287,7 @@ async def run_evaluation(
                 entry,
                 run_config,
                 tracer,
+                session_id,
             )
             results.append(result)
             # Spans are exported automatically by BatchSpanProcessor
@@ -358,10 +363,10 @@ async def _run(
             )
             return 0
 
-        # Validate all prerequisites (models, worker, collections)
-        await orchestrator.validate_prerequisites()
+        # One-time checks: model files, dataset, worker reachable
+        await orchestrator.validate_global_prerequisites()
 
-        # Load ground truth
+        # Load ground truth once (shared across all run configs)
         validation = orchestrator.validate_dataset()
         entries = load_ground_truth(validation.ground_truth_path)
         logger.info("Loaded %d ground truth entries", len(entries))
@@ -371,13 +376,22 @@ async def _run(
 
         try:
             for run_config in run_configs:
-                logger.info("Starting evaluation: %s", run_config.run_id)
+                # Load correct models + build collection for this specific config
+                await orchestrator.prepare_run_config(run_config)
+
+                session_id = f"{run_config.run_id}_{uuid4().hex[:8]}"
+                logger.info("Starting evaluation: %s (session=%s)", run_config.run_id, session_id)
+
+                run_entries = entries[: run_config.limit] if run_config.limit is not None else entries
+                if run_config.limit is not None:
+                    logger.info("Limiting to %d/%d entries", len(run_entries), len(entries))
 
                 results = await run_evaluation(
                     orchestrator,
                     run_config,
-                    entries,
+                    run_entries,
                     tracer,
+                    session_id=session_id,
                     show_progress=not quiet,
                 )
 

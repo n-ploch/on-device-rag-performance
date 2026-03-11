@@ -124,6 +124,7 @@ def result_to_spans(
     # === Root span: overall evaluation with metrics ===
     root_attrs: dict[str, Any] = {
         "run_id": run_id,
+        "langfuse.session.id": run_id,
         "claim_id": claim_id,
         "gen_ai.prompt": ground_truth.input,
         "gen_ai.completion": response.output,

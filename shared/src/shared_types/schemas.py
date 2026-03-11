@@ -55,6 +55,7 @@ class RunConfig(BaseModel):
     run_id: str
     retrieval: RetrievalConfig
     generation: GenerationConfig
+    limit: int | None = Field(default=None, gt=0, description="Max ground truth entries to evaluate. None = all.")
 
 
 class GenerateRequest(BaseModel):
@@ -168,7 +169,7 @@ class ServerConfig(BaseModel):
 
     n_ctx: int | None = None  # Context size (embedding: 512, generation: 2048)
     n_gpu_layers: int = -1  # GPU layers to offload (-1 = all)
-    parallel_slots: int = 4  # Parallel request slots (generation only)
+    parallel_slots: int = 1  # Parallel request slots (generation only)
     pooling: str = "mean"  # Pooling strategy (embedding only): mean, cls, last
 
 
