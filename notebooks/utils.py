@@ -533,17 +533,24 @@ def plot_stats_bar(
     group_by: str = "session_id",
     group_order: list[str] | None = None,
     stat: str = "mean",
+    show_std: bool = False,
+    show_band: bool = False,
+    band_percentiles: tuple[float, float] = (25, 75),
     figsize_per_col: tuple[int, int] = (5, 4),
 ) -> None:
     """Bar chart of a statistic for each group, one subplot per metric.
 
     Args:
-        df:             DataFrame with the *group_by* column.
-        cols:           Metric columns to plot.
-        group_by:       Column to group by.
-        group_order:    Explicit group order.
-        stat:           Aggregation statistic: ``"mean"``, ``"std"``, ``"median"``.
-        figsize_per_col: ``(width, height)`` per subplot.
+        df:               DataFrame with the *group_by* column.
+        cols:             Metric columns to plot.
+        group_by:         Column to group by.
+        group_order:      Explicit group order.
+        stat:             Aggregation statistic: ``"mean"``, ``"std"``, ``"median"``.
+        show_std:         Overlay capped error bars (±1 std) on each bar.
+        show_band:        Overlay a translucent rectangle for the percentile
+                          range defined by *band_percentiles*.
+        band_percentiles: ``(lower, upper)`` percentile pair. Defaults to ``(25, 75)``.
+        figsize_per_col:  ``(width, height)`` per subplot.
     """
     cols = _present(df, cols)
     if not cols:
@@ -551,17 +558,43 @@ def plot_stats_bar(
         return
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
     agg_fn = {"mean": "mean", "std": "std", "median": "median"}[stat]
+    subset = df[df[group_by].isin(groups)]
+    agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
 
-    agg = df[df[group_by].isin(groups)].groupby(group_by)[cols].agg(agg_fn).reindex(groups)
+    std_agg = lo_agg = hi_agg = None
+    if show_std:
+        std_agg = subset.groupby(group_by)[cols].std().reindex(groups)
+    if show_band:
+        lo_q, hi_q = band_percentiles[0] / 100, band_percentiles[1] / 100
+        lo_agg = subset.groupby(group_by)[cols].quantile(lo_q).reindex(groups)
+        hi_agg = subset.groupby(group_by)[cols].quantile(hi_q).reindex(groups)
 
     n = len(cols)
     fig, axes = plt.subplots(1, n, figsize=(figsize_per_col[0] * n, figsize_per_col[1]))
     if n == 1:
         axes = [axes]
 
+    x = list(range(len(groups)))
     for ax, col in zip(axes, agg.columns):
-        ax.bar(range(len(groups)), agg[col].values)
-        ax.set_xticks(range(len(groups)))
+        bars = ax.bar(x, agg[col].values)
+        bar_color = bars[0].get_facecolor()
+
+        if show_band:
+            lo_vals = lo_agg[col].values
+            hi_vals = hi_agg[col].values
+            ax.bar(x, hi_vals - lo_vals, bottom=lo_vals,
+                   color="grey", alpha=0.35,
+                   label=f"p{int(band_percentiles[0])}–p{int(band_percentiles[1])}")
+
+        if show_std:
+            ax.errorbar(x, agg[col].values, yerr=std_agg[col].values,
+                        fmt="none", capsize=6, color="black", linewidth=1.5,
+                        label="±1 std")
+
+        if show_std or show_band:
+            ax.legend(fontsize=7)
+
+        ax.set_xticks(x)
         ax.set_xticklabels(groups, rotation=45, ha="right", fontsize=8)
         ax.set_title(f"{stat}({col})", fontsize=9)
         ax.set_ylabel(col)
@@ -576,6 +609,7 @@ def plot_stats_line(
     group_by: str = "session_id",
     group_order: list[str] | None = None,
     stat: str = "mean",
+    show_std: bool = False,
     show_band: bool = False,
     band_percentiles: tuple[float, float] = (25, 75),
     figsize_per_col: tuple[int, int] = (5, 4),
@@ -591,9 +625,9 @@ def plot_stats_line(
         group_by:         Column to group by.
         group_order:      Explicit group order (x-axis sequence).
         stat:             Aggregation: ``"mean"``, ``"std"``, or ``"median"``.
-        show_band:        When True, draw a shaded band between *band_percentiles*.
-        band_percentiles: ``(lower, upper)`` percentile pair for the band.
-                          Defaults to ``(25, 75)``.
+        show_std:         Overlay capped error bars (±1 std) at every point.
+        show_band:        Draw a shaded fill between *band_percentiles*.
+        band_percentiles: ``(lower, upper)`` percentile pair. Defaults to ``(25, 75)``.
         figsize_per_col:  ``(width, height)`` per subplot.
     """
     cols = _present(df, cols)
@@ -605,7 +639,9 @@ def plot_stats_line(
     subset = df[df[group_by].isin(groups)]
     agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
 
-    lo_agg = hi_agg = None
+    std_agg = lo_agg = hi_agg = None
+    if show_std:
+        std_agg = subset.groupby(group_by)[cols].std().reindex(groups)
     if show_band:
         lo_q, hi_q = band_percentiles[0] / 100, band_percentiles[1] / 100
         lo_agg = subset.groupby(group_by)[cols].quantile(lo_q).reindex(groups)
@@ -619,11 +655,19 @@ def plot_stats_line(
     x = list(range(len(groups)))
     for ax, col in zip(axes, agg.columns):
         line, = ax.plot(x, agg[col].values, marker="o", linestyle="-")
+        c = line.get_color()
+
         if show_band:
             ax.fill_between(x, lo_agg[col].values, hi_agg[col].values,
-                            alpha=0.2, color=line.get_color(),
+                            alpha=0.2, color=c,
                             label=f"p{int(band_percentiles[0])}–p{int(band_percentiles[1])}")
+        if show_std:
+            ax.errorbar(x, agg[col].values, yerr=std_agg[col].values,
+                        fmt="none", capsize=6, color=c, alpha=0.7, linewidth=1.5,
+                        label="±1 std")
+        if show_band or show_std:
             ax.legend(fontsize=7)
+
         ax.set_xticks(x)
         ax.set_xticklabels(groups, rotation=45, ha="right", fontsize=8)
         ax.set_title(f"{stat}({col})", fontsize=9)
@@ -641,6 +685,7 @@ def plot_stats_multi_line(
     stat: str = "mean",
     figsize: tuple[int, int] = (10, 5),
     normalize: bool = False,
+    show_std: bool = False,
     show_band: bool = False,
     band_percentiles: tuple[float, float] = (25, 75),
 ) -> None:
@@ -658,10 +703,11 @@ def plot_stats_multi_line(
         normalize:        When True, each metric is min-max scaled to [0, 1] so
                           metrics with very different magnitudes can be compared
                           on the same y-axis.
-        show_band:        When True, draw a shaded band between *band_percentiles*
-                          for each metric (same colour, lower opacity).
-        band_percentiles: ``(lower, upper)`` percentile pair for the band.
-                          Defaults to ``(25, 75)``.
+        show_std:         Overlay capped error bars (±1 std) at every point on
+                          each line, using the same colour as the line.
+        show_band:        Draw a shaded fill between *band_percentiles* for each
+                          metric (same colour, lower opacity).
+        band_percentiles: ``(lower, upper)`` percentile pair. Defaults to ``(25, 75)``.
     """
     cols = _present(df, cols)
     if not cols:
@@ -672,7 +718,9 @@ def plot_stats_multi_line(
     subset = df[df[group_by].isin(groups)]
     agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
 
-    lo_agg = hi_agg = None
+    std_agg = lo_agg = hi_agg = None
+    if show_std:
+        std_agg = subset.groupby(group_by)[cols].std().reindex(groups)
     if show_band:
         lo_q, hi_q = band_percentiles[0] / 100, band_percentiles[1] / 100
         lo_agg = subset.groupby(group_by)[cols].quantile(lo_q).reindex(groups)
@@ -686,14 +734,20 @@ def plot_stats_multi_line(
         if show_band:
             lo_agg = (lo_agg - col_min) / scale
             hi_agg = (hi_agg - col_min) / scale
+        if show_std:
+            std_agg = std_agg / scale  # std scales but does not shift
 
     fig, ax = plt.subplots(figsize=figsize)
     x = list(range(len(groups)))
     for col in agg.columns:
         line, = ax.plot(x, agg[col].values, marker="o", linestyle="-", label=col)
+        c = line.get_color()
         if show_band:
             ax.fill_between(x, lo_agg[col].values, hi_agg[col].values,
-                            alpha=0.15, color=line.get_color())
+                            alpha=0.15, color=c)
+        if show_std:
+            ax.errorbar(x, agg[col].values, yerr=std_agg[col].values,
+                        fmt="none", capsize=6, color=c, alpha=0.6, linewidth=1.5)
 
     ax.set_xticks(x)
     ax.set_xticklabels(groups, rotation=45, ha="right", fontsize=8)
@@ -702,8 +756,13 @@ def plot_stats_multi_line(
     title = f"{stat} of metrics by {group_by}"
     if normalize:
         title += " (normalized)"
+    extras = []
     if show_band:
-        title += f"  [band: p{int(band_percentiles[0])}–p{int(band_percentiles[1])}]"
+        extras.append(f"band: p{int(band_percentiles[0])}–p{int(band_percentiles[1])}")
+    if show_std:
+        extras.append("bars: ±1 std")
+    if extras:
+        title += f"  [{', '.join(extras)}]"
     ax.set_title(title)
     ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
     plt.tight_layout()
