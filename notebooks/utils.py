@@ -276,6 +276,17 @@ def print_dataset_info(df: pd.DataFrame) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def _apply_labels(values: list, labels: dict | None) -> list[str]:
+    """Map *values* through *labels* dict; fall back to str(value) if absent."""
+    if not labels:
+        return [str(v) for v in values]
+    return [str(labels.get(v, v)) for v in values]
+
+
+# ---------------------------------------------------------------------------
 # Box plots
 # ---------------------------------------------------------------------------
 
@@ -287,32 +298,48 @@ def plot_boxplot(
     group_order: list[str] | None = None,
     ax=None,
     figsize: tuple[int, int] = (10, 5),
-) -> None:
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
     """Box plot for one numeric column, one box per group.
 
     Args:
         df:          DataFrame with the *group_by* column.
         col:         Numeric column to plot.
-        group_by:    Column to group by (``"session_id"`` or ``"run_id"``).
+        group_by:    Column to group by.
         group_order: Explicit x-axis order. Defaults to sorted unique values.
         ax:          Existing Axes to draw on. Creates a new figure when None.
         figsize:     Figure size when creating a standalone figure.
+        title:       Override the subplot title (defaults to *col*).
+        xlabel:      Override the x-axis label.
+        ylabel:      Override the y-axis label (defaults to *col*).
+        labels:      Dict mapping raw group values to display strings for ticks.
+
+    Returns:
+        ``(fig, ax)`` tuple.
     """
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
     data = [df.loc[df[group_by] == g, col].dropna().values for g in groups]
+    tick_labels = _apply_labels(groups, labels)
 
     standalone = ax is None
     if standalone:
         fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
 
-    ax.boxplot(data, tick_labels=groups, vert=True)
-    ax.set_title(col)
-    ax.set_ylabel(col)
-    ax.set_xticklabels(groups, rotation=45, ha="right")
+    ax.boxplot(data, tick_labels=tick_labels, vert=True)
+    ax.set_title(title if title is not None else col)
+    ax.set_ylabel(ylabel if ylabel is not None else col)
+    ax.set_xlabel(xlabel or "")
+    ax.set_xticklabels(tick_labels, rotation=45, ha="right")
 
     if standalone:
         plt.tight_layout()
         plt.show()
+    return fig, ax
 
 
 def plot_boxplots(
@@ -322,41 +349,65 @@ def plot_boxplots(
     group_order: list[str] | None = None,
     layout: str = "cols",
     figsize: tuple[int, int] | None = None,
-) -> None:
+    axes=None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
     """Box plots for multiple numeric columns.
 
     Args:
         df:          DataFrame with the *group_by* column.
         cols:        Columns to plot, one subplot each.
-        group_by:    Column to group by (``"session_id"`` or ``"run_id"``).
+        group_by:    Column to group by.
         group_order: Explicit x-axis order on every subplot.
-        layout:      ``"cols"`` — all subplots in one row (default).
-                     ``"rows"`` — all subplots in one column.
+        layout:      ``"cols"`` — one row (default). ``"rows"`` — one column.
         figsize:     Overall figure size. Auto-computed when None.
+        axes:        Existing flat sequence of Axes (one per column in *cols*).
+                     Creates a new figure when None.
+        title:       Figure suptitle.
+        xlabel:      X-axis label applied to every subplot.
+        ylabel:      Y-axis label applied to every subplot (overrides metric name).
+        labels:      Dict mapping raw group values to display strings.
+
+    Returns:
+        ``(fig, axes_list)`` tuple.
     """
     cols = _present(df, cols)
     if not cols:
         print("No matching columns found for boxplots.")
-        return
+        return None, None
     n = len(cols)
 
-    if layout == "rows":
-        nrows, ncols = n, 1
-        if figsize is None:
-            figsize = (10, max(4, 4 * n))
-    else:  # "cols" (default)
-        nrows, ncols = 1, n
-        if figsize is None:
-            figsize = (max(6, 4 * n), 5)
-
-    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, sharey=False, squeeze=False)
-    axes_flat = axes.flatten()
+    standalone = axes is None
+    if standalone:
+        if layout == "rows":
+            nrows, ncols = n, 1
+            if figsize is None:
+                figsize = (10, max(4, 4 * n))
+        else:
+            nrows, ncols = 1, n
+            if figsize is None:
+                figsize = (max(6, 4 * n), 5)
+        fig, axes_arr = plt.subplots(nrows, ncols, figsize=figsize, sharey=False, squeeze=False)
+        axes_flat = list(axes_arr.flatten())
+    else:
+        axes_flat = list(axes)
+        fig = axes_flat[0].figure
 
     for ax, col in zip(axes_flat, cols):
-        plot_boxplot(df, col, group_by=group_by, group_order=group_order, ax=ax)
+        plot_boxplot(df, col, group_by=group_by, group_order=group_order, ax=ax,
+                     labels=labels,
+                     ylabel=ylabel,
+                     xlabel=xlabel)
 
-    plt.tight_layout()
-    plt.show()
+    if title:
+        fig.suptitle(title)
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+    return fig, axes_flat[:n]
 
 
 # ---------------------------------------------------------------------------
@@ -371,49 +422,76 @@ def plot_metrics_grid(
     group_order: list[str] | None = None,
     bins: int = 30,
     figsize_per_panel: tuple[int, int] = (5, 3),
-) -> None:
+    axes=None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
     """Grid of histograms: rows = groups, columns = metrics.
 
     Args:
         df:               DataFrame with the *group_by* column.
         cols:             Metric columns to show (one column per grid column).
-        group_by:         Column to group by (``"session_id"`` or ``"run_id"``).
+        group_by:         Column to group by.
         group_order:      Explicit row order. Defaults to sorted unique values.
         bins:             Number of histogram bins.
         figsize_per_panel: ``(width, height)`` per individual subplot panel.
+        axes:             Existing 2-D array of Axes with shape
+                          ``(n_groups, n_cols)``. Creates a new figure when None.
+        title:            Figure suptitle.
+        xlabel:           X-axis label override (applied to bottom row).
+        ylabel:           Y-axis label override (applied to left column; default
+                          is the shortened group name).
+        labels:           Dict mapping raw group values to display strings for
+                          the left-column y-axis labels.
+
+    Returns:
+        ``(fig, axes_2d)`` tuple where *axes_2d* has shape ``(n_groups, n_cols)``.
     """
     cols = _present(df, cols)
     if not cols:
         print("No matching columns found for histogram grid.")
-        return
+        return None, None
 
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
     n_rows = len(groups)
     n_cols = len(cols)
+    row_labels = _apply_labels(groups, labels)
 
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(figsize_per_panel[0] * n_cols, figsize_per_panel[1] * n_rows),
-        squeeze=False,
-    )
+    standalone = axes is None
+    if standalone:
+        fig, axes_2d = plt.subplots(
+            n_rows, n_cols,
+            figsize=(figsize_per_panel[0] * n_cols, figsize_per_panel[1] * n_rows),
+            squeeze=False,
+        )
+    else:
+        import numpy as _np2
+        axes_2d = _np2.asarray(axes).reshape(n_rows, n_cols)
+        fig = axes_2d.flat[0].figure
 
-    for row_idx, group in enumerate(groups):
+    for row_idx, (group, row_label) in enumerate(zip(groups, row_labels)):
         group_df = df[df[group_by] == group]
         for col_idx, col in enumerate(cols):
-            ax = axes[row_idx][col_idx]
+            ax = axes_2d[row_idx][col_idx]
             data = group_df[col].dropna()
             ax.hist(data, bins=bins)
             if row_idx == 0:
                 ax.set_title(col, fontsize=9)
             if col_idx == 0:
-                label = str(group)
-                ax.set_ylabel(label[:35] + ("…" if len(label) > 35 else ""), fontsize=8)
+                yl = ylabel if ylabel is not None else row_label
+                short = yl[:35] + ("…" if len(yl) > 35 else "")
+                ax.set_ylabel(short, fontsize=8)
             if row_idx == n_rows - 1:
-                ax.set_xlabel(col, fontsize=8)
+                ax.set_xlabel(xlabel or col, fontsize=8)
 
-    plt.tight_layout()
-    plt.show()
+    if title:
+        fig.suptitle(title)
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+    return fig, axes_2d
 
 
 # ---------------------------------------------------------------------------
@@ -426,9 +504,9 @@ def plot_latency_as_hist(
     group_by: str = "session_id",
     group_order: list[str] | None = None,
     **kwargs,
-) -> None:
+) -> tuple:
     """Histogram grid for latency metrics."""
-    plot_metrics_grid(df, LATENCY_COLS, group_by=group_by, group_order=group_order, **kwargs)
+    return plot_metrics_grid(df, LATENCY_COLS, group_by=group_by, group_order=group_order, **kwargs)
 
 
 def plot_generation_as_hist(
@@ -436,9 +514,9 @@ def plot_generation_as_hist(
     group_by: str = "session_id",
     group_order: list[str] | None = None,
     **kwargs,
-) -> None:
+) -> tuple:
     """Histogram grid for generation throughput metrics."""
-    plot_metrics_grid(df, GENERATION_COLS, group_by=group_by, group_order=group_order, **kwargs)
+    return plot_metrics_grid(df, GENERATION_COLS, group_by=group_by, group_order=group_order, **kwargs)
 
 
 def plot_retrieval_as_hist(
@@ -446,9 +524,9 @@ def plot_retrieval_as_hist(
     group_by: str = "session_id",
     group_order: list[str] | None = None,
     **kwargs,
-) -> None:
+) -> tuple:
     """Histogram grid for retrieval quality metrics."""
-    plot_metrics_grid(df, RETRIEVAL_COLS, group_by=group_by, group_order=group_order, **kwargs)
+    return plot_metrics_grid(df, RETRIEVAL_COLS, group_by=group_by, group_order=group_order, **kwargs)
 
 
 def plot_hardware_as_hist(
@@ -456,9 +534,9 @@ def plot_hardware_as_hist(
     group_by: str = "session_id",
     group_order: list[str] | None = None,
     **kwargs,
-) -> None:
+) -> tuple:
     """Histogram grid for hardware resource metrics."""
-    plot_metrics_grid(df, HARDWARE_COLS, group_by=group_by, group_order=group_order, **kwargs)
+    return plot_metrics_grid(df, HARDWARE_COLS, group_by=group_by, group_order=group_order, **kwargs)
 
 
 def plot_generation_quality_as_hist(
@@ -466,9 +544,9 @@ def plot_generation_quality_as_hist(
     group_by: str = "session_id",
     group_order: list[str] | None = None,
     **kwargs,
-) -> None:
+) -> tuple:
     """Histogram grid for generation quality / scoring metrics."""
-    plot_metrics_grid(df, GENERATION_QUALITY_COLS, group_by=group_by, group_order=group_order, **kwargs)
+    return plot_metrics_grid(df, GENERATION_QUALITY_COLS, group_by=group_by, group_order=group_order, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +561,12 @@ def plot_scatter_two_metrics(
     group_by: str = "session_id",
     group_order: list[str] | None = None,
     figsize: tuple[int, int] = (8, 6),
-) -> None:
+    ax=None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
     """Scatter plot of two metrics, one colour per group.
 
     Args:
@@ -492,19 +575,31 @@ def plot_scatter_two_metrics(
         y_col:       Column for the y-axis.
         group_by:    Column to colour/group by.
         group_order: Legend order. Defaults to sorted unique values.
-        figsize:     Figure size.
+        figsize:     Figure size (ignored when *ax* is provided).
+        ax:          Existing axes to draw into. When None a new figure is created.
+        title:       Override plot title.
+        xlabel:      Override x-axis label.
+        ylabel:      Override y-axis label.
+        labels:      Dict mapping raw group values to display names in the legend.
     """
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
-    fig, ax = plt.subplots(figsize=figsize)
-    for label in groups:
-        group = df[df[group_by] == label]
-        ax.scatter(group[x_col], group[y_col], label=str(label), alpha=0.6, s=20)
-    ax.set_xlabel(x_col)
-    ax.set_ylabel(y_col)
-    ax.set_title(f"{x_col}  vs  {y_col}")
-    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
-    plt.tight_layout()
-    plt.show()
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+    for grp in groups:
+        group = df[df[group_by] == grp]
+        legend_label = str(labels.get(grp, grp)) if labels else str(grp)
+        ax.scatter(group[x_col], group[y_col], label=legend_label, alpha=0.6, s=20)
+    ax.set_xlabel(xlabel if xlabel is not None else x_col)
+    ax.set_ylabel(ylabel if ylabel is not None else y_col)
+    ax.set_title(title if title is not None else f"{x_col}  vs  {y_col}")
+    ax.legend(loc="best", fontsize=8)
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+    return fig, ax
 
 
 # ---------------------------------------------------------------------------
@@ -537,7 +632,12 @@ def plot_stats_bar(
     show_band: bool = False,
     band_percentiles: tuple[float, float] = (25, 75),
     figsize_per_col: tuple[int, int] = (5, 4),
-) -> None:
+    axes=None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
     """Bar chart of a statistic for each group, one subplot per metric.
 
     Args:
@@ -550,13 +650,20 @@ def plot_stats_bar(
         show_band:        Overlay a translucent rectangle for the percentile
                           range defined by *band_percentiles*.
         band_percentiles: ``(lower, upper)`` percentile pair. Defaults to ``(25, 75)``.
-        figsize_per_col:  ``(width, height)`` per subplot.
+        figsize_per_col:  ``(width, height)`` per subplot (ignored when *axes* provided).
+        axes:             Sequence of existing axes to draw into. When None a new
+                          figure is created. Must match ``len(cols)``.
+        title:            Shared suptitle override.
+        xlabel:           Override x-axis label (applied to all subplots).
+        ylabel:           Override y-axis label (applied to all subplots).
+        labels:           Dict mapping raw group values to display tick labels.
     """
     cols = _present(df, cols)
     if not cols:
         print("No matching columns found for stats bar chart.")
-        return
+        return None, None
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
+    tick_labels = _apply_labels(groups, labels)
     agg_fn = {"mean": "mean", "std": "std", "median": "median"}[stat]
     subset = df[df[group_by].isin(groups)]
     agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
@@ -570,14 +677,17 @@ def plot_stats_bar(
         hi_agg = subset.groupby(group_by)[cols].quantile(hi_q).reindex(groups)
 
     n = len(cols)
-    fig, axes = plt.subplots(1, n, figsize=(figsize_per_col[0] * n, figsize_per_col[1]))
-    if n == 1:
-        axes = [axes]
+    standalone = axes is None
+    if standalone:
+        fig, axes = plt.subplots(1, n, figsize=(figsize_per_col[0] * n, figsize_per_col[1]))
+        if n == 1:
+            axes = [axes]
+    else:
+        fig = axes[0].figure
 
     x = list(range(len(groups)))
     for ax, col in zip(axes, agg.columns):
         bars = ax.bar(x, agg[col].values)
-        bar_color = bars[0].get_facecolor()
 
         if show_band:
             lo_vals = lo_agg[col].values
@@ -592,15 +702,21 @@ def plot_stats_bar(
                         label="±1 std")
 
         if show_std or show_band:
-            ax.legend(fontsize=7)
+            ax.legend(loc="best", fontsize=7)
 
         ax.set_xticks(x)
-        ax.set_xticklabels(groups, rotation=45, ha="right", fontsize=8)
+        ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=8)
         ax.set_title(f"{stat}({col})", fontsize=9)
-        ax.set_ylabel(col)
+        ax.set_ylabel(ylabel if ylabel is not None else col)
+        if xlabel is not None:
+            ax.set_xlabel(xlabel)
 
-    plt.tight_layout()
-    plt.show()
+    if title is not None:
+        fig.suptitle(title)
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+    return fig, list(axes)
 
 
 def plot_stats_line(
@@ -613,7 +729,12 @@ def plot_stats_line(
     show_band: bool = False,
     band_percentiles: tuple[float, float] = (25, 75),
     figsize_per_col: tuple[int, int] = (5, 4),
-) -> None:
+    axes=None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
     """Line plot of a statistic across groups, one subplot per metric.
 
     Each group is a point on the x-axis connected by a line, with a dot
@@ -628,13 +749,20 @@ def plot_stats_line(
         show_std:         Overlay capped error bars (±1 std) at every point.
         show_band:        Draw a shaded fill between *band_percentiles*.
         band_percentiles: ``(lower, upper)`` percentile pair. Defaults to ``(25, 75)``.
-        figsize_per_col:  ``(width, height)`` per subplot.
+        figsize_per_col:  ``(width, height)`` per subplot (ignored when *axes* provided).
+        axes:             Sequence of existing axes to draw into. When None a new
+                          figure is created. Must match ``len(cols)``.
+        title:            Shared suptitle override.
+        xlabel:           Override x-axis label (applied to all subplots).
+        ylabel:           Override y-axis label (applied to all subplots).
+        labels:           Dict mapping raw group values to display tick labels.
     """
     cols = _present(df, cols)
     if not cols:
         print("No matching columns found for stats line plot.")
-        return
+        return None, None
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
+    tick_labels = _apply_labels(groups, labels)
     agg_fn = {"mean": "mean", "std": "std", "median": "median"}[stat]
     subset = df[df[group_by].isin(groups)]
     agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
@@ -648,9 +776,13 @@ def plot_stats_line(
         hi_agg = subset.groupby(group_by)[cols].quantile(hi_q).reindex(groups)
 
     n = len(cols)
-    fig, axes = plt.subplots(1, n, figsize=(figsize_per_col[0] * n, figsize_per_col[1]))
-    if n == 1:
-        axes = [axes]
+    standalone = axes is None
+    if standalone:
+        fig, axes = plt.subplots(1, n, figsize=(figsize_per_col[0] * n, figsize_per_col[1]))
+        if n == 1:
+            axes = [axes]
+    else:
+        fig = axes[0].figure
 
     x = list(range(len(groups)))
     for ax, col in zip(axes, agg.columns):
@@ -666,15 +798,21 @@ def plot_stats_line(
                         fmt="none", capsize=6, color=c, alpha=0.7, linewidth=1.5,
                         label="±1 std")
         if show_band or show_std:
-            ax.legend(fontsize=7)
+            ax.legend(loc="best", fontsize=7)
 
         ax.set_xticks(x)
-        ax.set_xticklabels(groups, rotation=45, ha="right", fontsize=8)
+        ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=8)
         ax.set_title(f"{stat}({col})", fontsize=9)
-        ax.set_ylabel(col)
+        ax.set_ylabel(ylabel if ylabel is not None else col)
+        if xlabel is not None:
+            ax.set_xlabel(xlabel)
 
-    plt.tight_layout()
-    plt.show()
+    if title is not None:
+        fig.suptitle(title)
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+    return fig, list(axes)
 
 
 def plot_stats_multi_line(
@@ -688,7 +826,12 @@ def plot_stats_multi_line(
     show_std: bool = False,
     show_band: bool = False,
     band_percentiles: tuple[float, float] = (25, 75),
-) -> None:
+    ax=None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
     """Line plot with all metrics overlaid in a single axes, one line per metric.
 
     Useful for comparing the trend of several metrics across groups at once.
@@ -699,7 +842,7 @@ def plot_stats_multi_line(
         group_by:         Column to group by (x-axis ticks).
         group_order:      Explicit x-axis sequence. Defaults to sorted unique values.
         stat:             Aggregation: ``"mean"``, ``"std"``, or ``"median"``.
-        figsize:          Figure size.
+        figsize:          Figure size (ignored when *ax* is provided).
         normalize:        When True, each metric is min-max scaled to [0, 1] so
                           metrics with very different magnitudes can be compared
                           on the same y-axis.
@@ -708,12 +851,18 @@ def plot_stats_multi_line(
         show_band:        Draw a shaded fill between *band_percentiles* for each
                           metric (same colour, lower opacity).
         band_percentiles: ``(lower, upper)`` percentile pair. Defaults to ``(25, 75)``.
+        ax:               Existing axes to draw into. When None a new figure is created.
+        title:            Override plot title.
+        xlabel:           Override x-axis label.
+        ylabel:           Override y-axis label.
+        labels:           Dict mapping raw group values to display tick labels.
     """
     cols = _present(df, cols)
     if not cols:
         print("No matching columns found for multi-line stats plot.")
-        return
+        return None, None
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
+    tick_labels = _apply_labels(groups, labels)
     agg_fn = {"mean": "mean", "std": "std", "median": "median"}[stat]
     subset = df[df[group_by].isin(groups)]
     agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
@@ -737,7 +886,12 @@ def plot_stats_multi_line(
         if show_std:
             std_agg = std_agg / scale  # std scales but does not shift
 
-    fig, ax = plt.subplots(figsize=figsize)
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
     x = list(range(len(groups)))
     for col in agg.columns:
         line, = ax.plot(x, agg[col].values, marker="o", linestyle="-", label=col)
@@ -750,23 +904,31 @@ def plot_stats_multi_line(
                         fmt="none", capsize=6, color=c, alpha=0.6, linewidth=1.5)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(groups, rotation=45, ha="right", fontsize=8)
-    ylabel = f"{stat} (normalized)" if normalize else stat
-    ax.set_ylabel(ylabel)
-    title = f"{stat} of metrics by {group_by}"
-    if normalize:
-        title += " (normalized)"
-    extras = []
-    if show_band:
-        extras.append(f"band: p{int(band_percentiles[0])}–p{int(band_percentiles[1])}")
-    if show_std:
-        extras.append("bars: ±1 std")
-    if extras:
-        title += f"  [{', '.join(extras)}]"
-    ax.set_title(title)
-    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
-    plt.tight_layout()
-    plt.show()
+    ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=8)
+
+    _ylabel = ylabel if ylabel is not None else (f"{stat} (normalized)" if normalize else stat)
+    ax.set_ylabel(_ylabel)
+    if xlabel is not None:
+        ax.set_xlabel(xlabel)
+
+    _title = title
+    if _title is None:
+        _title = f"{stat} of metrics by {group_by}"
+        if normalize:
+            _title += " (normalized)"
+        extras = []
+        if show_band:
+            extras.append(f"band: p{int(band_percentiles[0])}–p{int(band_percentiles[1])}")
+        if show_std:
+            extras.append("bars: ±1 std")
+        if extras:
+            _title += f"  [{', '.join(extras)}]"
+    ax.set_title(_title)
+    ax.legend(loc="best", fontsize=8)
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+    return fig, ax
 
 
 # ---------------------------------------------------------------------------
@@ -788,7 +950,12 @@ def plot_heatmap(
     annotate: bool | None = None,
     fmt: str = ".2f",
     figsize: tuple[int, int] | None = None,
-) -> None:
+    ax=None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
     """Heatmap of *metric* aggregated over every (var1, var2) cell.
 
     Rows = *var2* values, columns = *var1* values.  Cell colour encodes the
@@ -811,11 +978,17 @@ def plot_heatmap(
                     ``True`` when the grid has ≤ 400 cells, ``False`` otherwise.
         fmt:        Python format string for cell annotations. Defaults to
                     ``".2f"``.
-        figsize:    Figure size. Auto-computed from grid dimensions when None.
+        figsize:    Figure size. Auto-computed from grid dimensions when None
+                    (ignored when *ax* is provided).
+        ax:         Existing axes to draw into. When None a new figure is created.
+        title:      Override plot title.
+        xlabel:     Override x-axis label (default: *var1*).
+        ylabel:     Override y-axis label (default: *var2*).
+        labels:     Dict mapping raw *var1* column values to display tick labels.
     """
     if metric not in df.columns:
         print(f"Column '{metric}' not found in DataFrame.")
-        return
+        return None, None
 
     agg_fn = {
         "mean": "mean", "median": "median", "std": "std",
@@ -843,25 +1016,30 @@ def plot_heatmap(
     if annotate is None:
         annotate = n_rows * n_cols <= 400
 
-    if figsize is None:
-        cell_w = max(0.6, min(2.0, 12 / n_cols))
-        cell_h = max(0.3, min(0.8, 20 / n_rows))
-        figsize = (max(6, cell_w * n_cols + 2), max(4, cell_h * n_rows + 1))
+    standalone = ax is None
+    if standalone:
+        if figsize is None:
+            cell_w = max(0.6, min(2.0, 12 / n_cols))
+            cell_h = max(0.3, min(0.8, 20 / n_rows))
+            figsize = (max(6, cell_w * n_cols + 2), max(4, cell_h * n_rows + 1))
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
 
     mat = pivot.values.astype(float)
     vmin, vmax = _np.nanmin(mat), _np.nanmax(mat)
 
-    fig, ax = plt.subplots(figsize=figsize)
     im = ax.imshow(mat, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
     plt.colorbar(im, ax=ax, label=f"{agg}({metric})", shrink=0.8)
 
+    col_tick_labels = _apply_labels(list(pivot.columns), labels)
     ax.set_xticks(range(n_cols))
-    ax.set_xticklabels(pivot.columns, rotation=45, ha="right", fontsize=8)
+    ax.set_xticklabels(col_tick_labels, rotation=45, ha="right", fontsize=8)
     ax.set_yticks(range(n_rows))
-    ax.set_yticklabels(pivot.index, fontsize=8)
-    ax.set_xlabel(var1)
-    ax.set_ylabel(var2)
-    ax.set_title(f"{agg}({metric})  —  {var2} × {var1}")
+    ax.set_yticklabels(list(pivot.index), fontsize=8)
+    ax.set_xlabel(xlabel if xlabel is not None else var1)
+    ax.set_ylabel(ylabel if ylabel is not None else var2)
+    ax.set_title(title if title is not None else f"{agg}({metric})  —  {var2} × {var1}")
 
     if annotate:
         # Choose text colour (black/white) based on relative cell brightness
@@ -879,5 +1057,7 @@ def plot_heatmap(
                 ax.text(col, row, txt, ha="center", va="center",
                         fontsize=font_size, color=color)
 
-    plt.tight_layout()
-    plt.show()
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+    return fig, ax
