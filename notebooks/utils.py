@@ -767,3 +767,117 @@ def plot_stats_multi_line(
     ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
     plt.tight_layout()
     plt.show()
+
+
+# ---------------------------------------------------------------------------
+# Heatmap: var1 × var2 for a single metric
+# ---------------------------------------------------------------------------
+
+import numpy as _np  # local alias to avoid polluting the module namespace
+
+
+def plot_heatmap(
+    df: pd.DataFrame,
+    metric: str,
+    var1: str = "run_id",
+    var2: str = "claim_id",
+    agg: str = "mean",
+    var1_order: list[str] | None = None,
+    var2_order: list[str] | None = None,
+    cmap: str = "viridis",
+    annotate: bool | None = None,
+    fmt: str = ".2f",
+    figsize: tuple[int, int] | None = None,
+) -> None:
+    """Heatmap of *metric* aggregated over every (var1, var2) cell.
+
+    Rows = *var2* values, columns = *var1* values.  Cell colour encodes the
+    aggregated metric value; an optional text annotation shows the number.
+
+    Args:
+        df:         Source DataFrame.
+        metric:     Numeric column to aggregate and display.
+        var1:       Column for the x-axis (columns of the heatmap).
+                    Defaults to ``"run_id"``.
+        var2:       Column for the y-axis (rows of the heatmap).
+                    Defaults to ``"claim_id"``.
+        agg:        Aggregation function name: ``"mean"``, ``"median"``,
+                    ``"std"``, ``"min"``, ``"max"``, ``"count"``.
+                    Defaults to ``"mean"``.
+        var1_order: Explicit column order. Defaults to sorted unique values.
+        var2_order: Explicit row order. Defaults to sorted unique values.
+        cmap:       Matplotlib colormap name. Defaults to ``"viridis"``.
+        annotate:   Whether to print the value in each cell.  Defaults to
+                    ``True`` when the grid has ≤ 400 cells, ``False`` otherwise.
+        fmt:        Python format string for cell annotations. Defaults to
+                    ``".2f"``.
+        figsize:    Figure size. Auto-computed from grid dimensions when None.
+    """
+    if metric not in df.columns:
+        print(f"Column '{metric}' not found in DataFrame.")
+        return
+
+    agg_fn = {
+        "mean": "mean", "median": "median", "std": "std",
+        "min": "min", "max": "max", "count": "count",
+    }.get(agg)
+    if agg_fn is None:
+        raise ValueError(f"Unknown agg '{agg}'. Choose from: mean, median, std, min, max, count.")
+
+    # Build pivot: rows=var2, cols=var1
+    grouped = df.groupby([var1, var2])[metric].agg(agg_fn).reset_index()
+    pivot = grouped.pivot(index=var2, columns=var1, values=metric)
+
+    # Apply ordering
+    if var1_order:
+        pivot = pivot.reindex(columns=[v for v in var1_order if v in pivot.columns])
+    else:
+        pivot = pivot.reindex(columns=sorted(pivot.columns))
+
+    if var2_order:
+        pivot = pivot.reindex(index=[v for v in var2_order if v in pivot.index])
+    else:
+        pivot = pivot.reindex(index=sorted(pivot.index))
+
+    n_rows, n_cols = pivot.shape
+    if annotate is None:
+        annotate = n_rows * n_cols <= 400
+
+    if figsize is None:
+        cell_w = max(0.6, min(2.0, 12 / n_cols))
+        cell_h = max(0.3, min(0.8, 20 / n_rows))
+        figsize = (max(6, cell_w * n_cols + 2), max(4, cell_h * n_rows + 1))
+
+    mat = pivot.values.astype(float)
+    vmin, vmax = _np.nanmin(mat), _np.nanmax(mat)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    im = ax.imshow(mat, aspect="auto", cmap=cmap, vmin=vmin, vmax=vmax)
+    plt.colorbar(im, ax=ax, label=f"{agg}({metric})", shrink=0.8)
+
+    ax.set_xticks(range(n_cols))
+    ax.set_xticklabels(pivot.columns, rotation=45, ha="right", fontsize=8)
+    ax.set_yticks(range(n_rows))
+    ax.set_yticklabels(pivot.index, fontsize=8)
+    ax.set_xlabel(var1)
+    ax.set_ylabel(var2)
+    ax.set_title(f"{agg}({metric})  —  {var2} × {var1}")
+
+    if annotate:
+        # Choose text colour (black/white) based on relative cell brightness
+        text_thresh = (vmin + vmax) / 2
+        font_size = max(5, min(9, 120 // max(n_rows, n_cols)))
+        for row in range(n_rows):
+            for col in range(n_cols):
+                val = mat[row, col]
+                if _np.isnan(val):
+                    txt = "—"
+                    color = "grey"
+                else:
+                    txt = format(val, fmt)
+                    color = "white" if val < text_thresh else "black"
+                ax.text(col, row, txt, ha="center", va="center",
+                        fontsize=font_size, color=color)
+
+    plt.tight_layout()
+    plt.show()
