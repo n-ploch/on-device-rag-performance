@@ -42,11 +42,28 @@ class RetrievalConfig(BaseModel):
     k: int = Field(default=3, gt=0)
 
 
+class RemoteGenerationConfig(BaseModel):
+    """Configuration for remote OpenAI-compatible API generation."""
+
+    base_url: str  # e.g., "https://openrouter.ai/api/v1"
+    api_key_env: str = "OPENAI_API_KEY"  # Name of env var holding the API key
+    extra_headers: dict[str, str] = Field(default_factory=dict)
+    rate_limit_rps: float | None = None  # Max requests/second (None = unlimited)
+
+
 class GenerationConfig(BaseModel):
     """Generation model and quantization."""
 
     model: str
-    quantization: str = "q4_k_m"
+    quantization: str = "q4_k_m"  # Ignored when hosting="remote"
+    hosting: Literal["local", "remote"] = "local"
+    remote: RemoteGenerationConfig | None = None
+
+    @model_validator(mode="after")
+    def _validate_remote(self) -> "GenerationConfig":
+        if self.hosting == "remote" and self.remote is None:
+            raise ValueError("remote config is required when hosting='remote'")
+        return self
 
 
 class RunConfig(BaseModel):
@@ -186,6 +203,7 @@ class LoadModelsRequest(BaseModel):
     generator_quantization: str
     embedder_config: ServerConfig | None = None  # Optional embedding server config
     generator_config: ServerConfig | None = None  # Optional generation server config
+    generation_config: GenerationConfig | None = None  # Full generation config; required for remote hosting
 
 
 class LoadModelsResponse(BaseModel):
