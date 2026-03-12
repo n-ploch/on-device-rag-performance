@@ -14,6 +14,7 @@ from orchestrator.config import EvalConfig
 from orchestrator.datasets.schemas import GroundTruthEntry
 from orchestrator.runner import (
     EvaluationResult,
+    _run_configs_loop,
     evaluate_single,
     load_ground_truth,
 )
@@ -311,6 +312,66 @@ class TestEvaluateSingle:
         assert result.recall_at_k is None
         assert result.precision_at_k is None
         assert result.mrr is None
+
+
+class TestRepeatRunConfig:
+    """Tests for the repeat field in RunConfig evaluation loop."""
+
+    def _make_run_config(self, repeat: int | None = None) -> RunConfig:
+        return RunConfig(
+            run_id="test_run",
+            retrieval=RetrievalConfig(
+                dataset_id="scifact",
+                model="intfloat/multilingual-e5-small",
+                quantization="fp16",
+                dimensions=384,
+                k=3,
+            ),
+            generation=GenerationConfig(
+                model="TheBloke/Mistral-7B-Instruct-v0.1-GGUF",
+                quantization="q4_k_m",
+            ),
+            repeat=repeat,
+        )
+
+    @pytest.mark.asyncio
+    async def test_repeat_none_runs_once(self, sample_ground_truth_entry, mock_tracer):
+        """With repeat=None (default), run_evaluation is called exactly once."""
+        run_config = self._make_run_config(repeat=None)
+
+        with patch("orchestrator.runner.run_evaluation", new_callable=AsyncMock) as mock_eval:
+            mock_eval.return_value = []
+            await _run_configs_loop(
+                run_configs=[run_config],
+                orchestrator=AsyncMock(),
+                entries=[sample_ground_truth_entry],
+                tracer=mock_tracer,
+                quiet=True,
+            )
+
+        assert mock_eval.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_repeat_generates_multiple_sessions(self, sample_ground_truth_entry, mock_tracer):
+        """With repeat=3, run_evaluation is called 3 times with distinct session IDs."""
+        run_config = self._make_run_config(repeat=3)
+
+        with patch("orchestrator.runner.run_evaluation", new_callable=AsyncMock) as mock_eval:
+            mock_eval.return_value = []
+            await _run_configs_loop(
+                run_configs=[run_config],
+                orchestrator=AsyncMock(),
+                entries=[sample_ground_truth_entry],
+                tracer=mock_tracer,
+                quiet=True,
+            )
+
+        assert mock_eval.call_count == 3
+        session_ids = [call.kwargs["session_id"] for call in mock_eval.call_args_list]
+        # All session IDs start with the run_id
+        assert all(sid.startswith("test_run_") for sid in session_ids)
+        # All session IDs are distinct
+        assert len(set(session_ids)) == 3
 
 
 class TestCLI:
