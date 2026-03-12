@@ -719,6 +719,126 @@ def plot_stats_bar(
     return fig, list(axes)
 
 
+def plot_grouped_bars(
+    df: pd.DataFrame,
+    cols: list[str],
+    group_by: str = "session_id",
+    group_order: list[str] | None = None,
+    stat: str = "mean",
+    error: str | None = "std",
+    percentiles: tuple[float, float] = (25, 75),
+    bar_width: float = 0.8,
+    figsize: tuple[int, int] = (10, 5),
+    ax=None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
+    """Grouped bar chart: one cluster per metric, one bar per group.
+
+    The metrics in *cols* are placed in order along the x-axis. Within each
+    metric's cluster the bars are centered on the x tick. Error bars are drawn
+    in the same colour as their bar (no grey).
+
+    Args:
+        df:           DataFrame with the *group_by* column.
+        cols:         Metric columns — displayed left-to-right in this order.
+        group_by:     Column that defines the bar groups (legend entries).
+        group_order:  Explicit group order within each cluster. Defaults to
+                      sorted unique values.
+        stat:         Aggregation: ``"mean"``, ``"median"``, or ``"std"``.
+        error:        Error bar style.
+                      ``"std"`` — symmetric ±1 std bars.
+                      ``"percentile"`` — asymmetric bars from *percentiles*
+                      to the stat value; coloured to match each bar.
+                      ``None`` — no error bars.
+        percentiles:  ``(lower, upper)`` percentile pair used when
+                      ``error="percentile"``. Defaults to ``(25, 75)``.
+        bar_width:    Total width of each cluster (all bars combined).
+                      Defaults to ``0.8``.
+        figsize:      Figure size (ignored when *ax* is provided).
+        ax:           Existing axes to draw into. When None a new figure is
+                      created.
+        title:        Override plot title.
+        xlabel:       Override x-axis label.
+        ylabel:       Override y-axis label.
+        labels:       Dict mapping raw group values to legend display strings.
+
+    Returns:
+        ``(fig, ax)`` tuple.
+    """
+    cols = _present(df, cols)
+    if not cols:
+        print("No matching columns found for grouped bar chart.")
+        return None, None
+
+    groups = group_order or sorted(df[group_by].dropna().unique().tolist())
+    n_groups = len(groups)
+    subset = df[df[group_by].isin(groups)]
+
+    agg_fn = {"mean": "mean", "median": "median", "std": "std"}[stat]
+    agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
+
+    std_agg = lo_agg = hi_agg = None
+    if error == "std":
+        std_agg = subset.groupby(group_by)[cols].std().reindex(groups)
+    elif error == "percentile":
+        lo_q, hi_q = percentiles[0] / 100, percentiles[1] / 100
+        lo_agg = subset.groupby(group_by)[cols].quantile(lo_q).reindex(groups)
+        hi_agg = subset.groupby(group_by)[cols].quantile(hi_q).reindex(groups)
+
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+
+    x = _np.arange(len(cols))
+    w = bar_width / n_groups
+    offsets = [(-n_groups / 2 + i + 0.5) * w for i in range(n_groups)]
+    legend_labels = _apply_labels(groups, labels)
+
+    for i, (grp, offset, legend_label) in enumerate(zip(groups, offsets, legend_labels)):
+        heights = agg.loc[grp, cols].values.astype(float)
+        bars = ax.bar(x + offset, heights, width=w, label=legend_label)
+        bar_color = bars[0].get_facecolor()
+
+        if error == "std":
+            yerr = std_agg.loc[grp, cols].values.astype(float)
+            ax.errorbar(
+                x + offset, heights, yerr=yerr,
+                fmt="none", capsize=4, color=bar_color, linewidth=1.2,
+            )
+        elif error == "percentile":
+            lo = lo_agg.loc[grp, cols].values.astype(float)
+            hi = hi_agg.loc[grp, cols].values.astype(float)
+            yerr = _np.array([heights - lo, hi - heights])
+            ax.errorbar(
+                x + offset, heights, yerr=yerr,
+                fmt="none", capsize=4, color=bar_color, linewidth=1.2,
+            )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(cols, rotation=45, ha="right", fontsize=8)
+
+    _error_label = (
+        f"  [error: ±1 std]" if error == "std"
+        else f"  [error: p{int(percentiles[0])}–p{int(percentiles[1])}]" if error == "percentile"
+        else ""
+    )
+    ax.set_title(title if title is not None else f"{stat} by metric{_error_label}")
+    ax.set_ylabel(ylabel if ylabel is not None else stat)
+    if xlabel is not None:
+        ax.set_xlabel(xlabel)
+    ax.legend(loc="best", fontsize=8)
+
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+    return fig, ax
+
+
 def plot_stats_line(
     df: pd.DataFrame,
     cols: list[str],
