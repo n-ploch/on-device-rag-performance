@@ -32,6 +32,7 @@ from shared_types.schemas import (
 from worker.datasets.corpus_reader import CorpusReader
 from worker.models.embedder_http import LlamaServerEmbedder
 from worker.models.generator_http import LlamaServerGenerator
+from worker.models.generator_remote import RemoteGenerator, TokenBucketRateLimiter
 from worker.models.registry import get_model_path
 from worker.services.embedding import EmbeddingService
 from worker.services.generation import GenerationService
@@ -71,6 +72,7 @@ async def lifespan(app: FastAPI):
     app.state.embedder = None
     app.state.generator = None
     app.state.loaded_models = None
+    app.state.generator_hosting = None  # "local" | "remote"
 
     # Initialize collections directory
     collections_dir = Path(os.environ.get("LOCAL_COLLECTIONS_DIR", "./collections"))
@@ -128,11 +130,8 @@ def create_app() -> FastAPI:
             req.app.state.generator.close()
             req.app.state.generator = None
 
-        # Get model paths
+        # --- Embedding server (always local) ---
         embedder_path = get_model_path(request.embedder_repo, request.embedder_quantization)
-        generator_path = get_model_path(request.generator_repo, request.generator_quantization)
-
-        # Start embedding server with optional custom config
         embedder_cfg = request.embedder_config
         logger.info("Starting embedding server: %s (%s)", request.embedder_repo, request.embedder_quantization)
         if not await server_manager.start_embedding_server(
@@ -146,35 +145,64 @@ def create_app() -> FastAPI:
                 detail=f"Failed to start embedding server for {request.embedder_repo}",
             )
 
-        # Start generation server with optional custom config
-        generator_cfg = request.generator_config
-        logger.info("Starting generation server: %s (%s)", request.generator_repo, request.generator_quantization)
-        if not await server_manager.start_generation_server(
-            model_path=generator_path,
-            n_ctx=generator_cfg.n_ctx if generator_cfg and generator_cfg.n_ctx else 2048,
-            n_gpu_layers=generator_cfg.n_gpu_layers if generator_cfg else -1,
-            parallel_slots=generator_cfg.parallel_slots if generator_cfg else 4,
-        ):
-            # Stop embedding server if generation server fails
-            await server_manager.stop_embedding_server()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to start generation server for {request.generator_repo}",
+        req.app.state.embedder = LlamaServerEmbedder(server_url=server_manager.embedding_url)
+
+        # --- Generator: local llama-server or remote API ---
+        gen_cfg = request.generation_config
+
+        if gen_cfg is not None and gen_cfg.hosting == "remote":
+            remote_cfg = gen_cfg.remote  # validated non-None by schema
+            api_key = os.environ.get(remote_cfg.api_key_env)
+            if not api_key:
+                await server_manager.stop_embedding_server()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"API key env var '{remote_cfg.api_key_env}' is not set",
+                )
+            rate_limiter = (
+                TokenBucketRateLimiter(remote_cfg.rate_limit_rps)
+                if remote_cfg.rate_limit_rps is not None
+                else None
             )
-
-        # Create HTTP clients
-        req.app.state.embedder = LlamaServerEmbedder(
-            server_url=server_manager.embedding_url,
-        )
-        req.app.state.generator = LlamaServerGenerator(
-            server_url=server_manager.generation_url,
-        )
-
-        # Track what's loaded for validation
-        req.app.state.loaded_models = {
-            "embedder": (request.embedder_repo, request.embedder_quantization),
-            "generator": (request.generator_repo, request.generator_quantization),
-        }
+            req.app.state.generator = RemoteGenerator(
+                base_url=remote_cfg.base_url,
+                model=gen_cfg.model,
+                api_key=api_key,
+                extra_headers=remote_cfg.extra_headers,
+                rate_limiter=rate_limiter,
+            )
+            req.app.state.generator_hosting = "remote"
+            req.app.state.loaded_models = {
+                "embedder": (request.embedder_repo, request.embedder_quantization),
+                "generator": (gen_cfg.model, "remote"),
+            }
+            generator_label = f"{gen_cfg.model} (remote: {remote_cfg.base_url})"
+            message = "Models loaded: embedding=llama-server, generation=remote API"
+            logger.info("Remote generator configured: model=%s, base_url=%s", gen_cfg.model, remote_cfg.base_url)
+        else:
+            # Local llama-server path (unchanged)
+            generator_path = get_model_path(request.generator_repo, request.generator_quantization)
+            generator_cfg = request.generator_config
+            logger.info("Starting generation server: %s (%s)", request.generator_repo, request.generator_quantization)
+            if not await server_manager.start_generation_server(
+                model_path=generator_path,
+                n_ctx=generator_cfg.n_ctx if generator_cfg and generator_cfg.n_ctx else 2048,
+                n_gpu_layers=generator_cfg.n_gpu_layers if generator_cfg else -1,
+                parallel_slots=generator_cfg.parallel_slots if generator_cfg else 4,
+            ):
+                await server_manager.stop_embedding_server()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to start generation server for {request.generator_repo}",
+                )
+            req.app.state.generator = LlamaServerGenerator(server_url=server_manager.generation_url)
+            req.app.state.generator_hosting = "local"
+            req.app.state.loaded_models = {
+                "embedder": (request.embedder_repo, request.embedder_quantization),
+                "generator": (request.generator_repo, request.generator_quantization),
+            }
+            generator_label = f"{request.generator_repo}/{request.generator_quantization}"
+            message = "Models loaded successfully via llama-server"
 
         # Initialize services with new clients
         collections_dir = req.app.state.collections_dir
@@ -190,11 +218,11 @@ def create_app() -> FastAPI:
             generator=req.app.state.generator,
         )
 
-        logger.info("Models loaded successfully via llama-server")
+        logger.info(message)
         return LoadModelsResponse(
             embedder=f"{request.embedder_repo}/{request.embedder_quantization}",
-            generator=f"{request.generator_repo}/{request.generator_quantization}",
-            message="Models loaded successfully via llama-server",
+            generator=generator_label,
+            message=message,
         )
 
     @app.post("/generate", response_model=GenerateResponse)
@@ -216,12 +244,14 @@ def create_app() -> FastAPI:
                 status_code=400,
                 detail=f"RunConfig expects embedder {expected_embedder}, but {loaded['embedder']} is loaded",
             )
-        expected_generator = (request.run_config.generation.model, request.run_config.generation.quantization)
-        if expected_generator != loaded["generator"]:
-            raise HTTPException(
-                status_code=400,
-                detail=f"RunConfig expects generator {expected_generator}, but {loaded['generator']} is loaded",
-            )
+        # For remote generators the loaded key is (model, "remote"); skip quantization check
+        if req.app.state.generator_hosting != "remote":
+            expected_generator = (request.run_config.generation.model, request.run_config.generation.quantization)
+            if expected_generator != loaded["generator"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"RunConfig expects generator {expected_generator}, but {loaded['generator']} is loaded",
+                )
 
         logger.debug(
             "Retrieval config: k=%d, model=%s",

@@ -89,7 +89,9 @@ def extract_required_models(config: EvalConfig) -> list[ModelSpec]:
                 )
             )
 
-        # Generation model
+        # Generation model — skip for remote hosting (no local GGUF needed)
+        if run_config.generation.hosting == "remote":
+            continue
         generation_key = (
             run_config.generation.model,
             run_config.generation.quantization,

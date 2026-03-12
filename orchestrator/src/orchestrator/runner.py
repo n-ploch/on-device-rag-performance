@@ -309,6 +309,77 @@ async def run_evaluation(
     return results
 
 
+async def _run_configs_loop(
+    run_configs: list[RunConfig],
+    orchestrator: Orchestrator,
+    entries: list[GroundTruthEntry],
+    tracer: trace.Tracer,
+    quiet: bool,
+) -> None:
+    """Execute the evaluation loop over run configs, honouring the `repeat` field."""
+    for run_config in run_configs:
+        # Load correct models + build collection for this specific config
+        await orchestrator.prepare_run_config(run_config)
+
+        repeat_count = run_config.repeat if run_config.repeat is not None else 1
+
+        for rep in range(repeat_count):
+            session_id = f"{run_config.run_id}_{uuid4().hex[:8]}"
+            if repeat_count > 1:
+                logger.info(
+                    "Starting evaluation: %s (session=%s, rep=%d/%d)",
+                    run_config.run_id,
+                    session_id,
+                    rep + 1,
+                    repeat_count,
+                )
+            else:
+                logger.info(
+                    "Starting evaluation: %s (session=%s)", run_config.run_id, session_id
+                )
+
+            run_entries = entries[: run_config.limit] if run_config.limit is not None else entries
+            if run_config.limit is not None:
+                logger.info("Limiting to %d/%d entries", len(run_entries), len(entries))
+
+            results = await run_evaluation(
+                orchestrator,
+                run_config,
+                run_entries,
+                tracer,
+                session_id=session_id,
+                show_progress=not quiet,
+            )
+
+            # Compute and print summary
+            results_with_recall = [r for r in results if r.recall_at_k is not None]
+            if results_with_recall:
+                avg_recall = sum(r.recall_at_k for r in results_with_recall) / len(
+                    results_with_recall
+                )
+                avg_precision = sum(
+                    r.precision_at_k for r in results_with_recall
+                ) / len(results_with_recall)
+                avg_mrr = sum(r.mrr for r in results_with_recall) / len(
+                    results_with_recall
+                )
+            else:
+                avg_recall = avg_precision = avg_mrr = 0.0
+
+            abstention_count = sum(1 for r in results if r.is_abstention)
+
+            logger.info(
+                "Completed %s: recall@k=%.3f, precision@k=%.3f, mrr=%.3f, "
+                "abstentions=%d/%d",
+                run_config.run_id,
+                avg_recall,
+                avg_precision,
+                avg_mrr,
+                abstention_count,
+                len(results),
+            )
+
+
 async def _run(
     config_path: Path,
     dry_run: bool = False,
@@ -375,53 +446,13 @@ async def _run(
         tracer = setup_tracing()
 
         try:
-            for run_config in run_configs:
-                # Load correct models + build collection for this specific config
-                await orchestrator.prepare_run_config(run_config)
-
-                session_id = f"{run_config.run_id}_{uuid4().hex[:8]}"
-                logger.info("Starting evaluation: %s (session=%s)", run_config.run_id, session_id)
-
-                run_entries = entries[: run_config.limit] if run_config.limit is not None else entries
-                if run_config.limit is not None:
-                    logger.info("Limiting to %d/%d entries", len(run_entries), len(entries))
-
-                results = await run_evaluation(
-                    orchestrator,
-                    run_config,
-                    run_entries,
-                    tracer,
-                    session_id=session_id,
-                    show_progress=not quiet,
-                )
-
-                # Compute and print summary
-                results_with_recall = [r for r in results if r.recall_at_k is not None]
-                if results_with_recall:
-                    avg_recall = sum(r.recall_at_k for r in results_with_recall) / len(
-                        results_with_recall
-                    )
-                    avg_precision = sum(
-                        r.precision_at_k for r in results_with_recall
-                    ) / len(results_with_recall)
-                    avg_mrr = sum(r.mrr for r in results_with_recall) / len(
-                        results_with_recall
-                    )
-                else:
-                    avg_recall = avg_precision = avg_mrr = 0.0
-
-                abstention_count = sum(1 for r in results if r.is_abstention)
-
-                logger.info(
-                    "Completed %s: recall@k=%.3f, precision@k=%.3f, mrr=%.3f, "
-                    "abstentions=%d/%d",
-                    run_config.run_id,
-                    avg_recall,
-                    avg_precision,
-                    avg_mrr,
-                    abstention_count,
-                    len(results),
-                )
+            await _run_configs_loop(
+                run_configs=run_configs,
+                orchestrator=orchestrator,
+                entries=entries,
+                tracer=tracer,
+                quiet=quiet,
+            )
         finally:
             shutdown_tracing()
 

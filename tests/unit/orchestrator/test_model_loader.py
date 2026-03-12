@@ -408,3 +408,101 @@ class TestEnsureModels:
             statuses = ensure_models(sample_config)
 
         assert len(statuses) == 3
+
+
+class TestExtractRequiredModelsRemote:
+    """Tests for extract_required_models with remote generation configs."""
+
+    @pytest.fixture
+    def remote_config_data(self) -> dict:
+        return {
+            "dataset": {"id": "scifact", "name": "scifact"},
+            "run_configs": [
+                {
+                    "run_id": "local_run",
+                    "retrieval": {
+                        "dataset_id": "scifact",
+                        "model": "intfloat/multilingual-e5-small",
+                        "quantization": "fp16",
+                        "dimensions": 384,
+                    },
+                    "generation": {
+                        "model": "TheBloke/Mistral-7B-Instruct-v0.1-GGUF",
+                        "quantization": "q4_k_m",
+                        "hosting": "local",
+                    },
+                },
+                {
+                    "run_id": "remote_run",
+                    "retrieval": {
+                        "dataset_id": "scifact",
+                        "model": "intfloat/multilingual-e5-small",
+                        "quantization": "fp16",
+                        "dimensions": 384,
+                    },
+                    "generation": {
+                        "model": "mistral-large-latest",
+                        "hosting": "remote",
+                        "remote": {
+                            "base_url": "https://api.mistral.ai/v1",
+                            "api_key_env": "MISTRAL_API_KEY",
+                        },
+                    },
+                },
+            ],
+        }
+
+    def test_remote_generation_model_excluded(self, remote_config_data):
+        """Remote generation models must not appear in the extracted model list."""
+        config = EvalConfig.model_validate(remote_config_data)
+        models = extract_required_models(config)
+
+        repos = [m.repo for m in models]
+        assert "mistral-large-latest" not in repos
+
+    def test_local_generation_model_still_included(self, remote_config_data):
+        """Local generation models are still included when remote configs exist."""
+        config = EvalConfig.model_validate(remote_config_data)
+        models = extract_required_models(config)
+
+        repos = [m.repo for m in models]
+        assert "TheBloke/Mistral-7B-Instruct-v0.1-GGUF" in repos
+
+    def test_retrieval_model_included_for_remote_run(self, remote_config_data):
+        """Retrieval model is still extracted even when generation is remote."""
+        config = EvalConfig.model_validate(remote_config_data)
+        models = extract_required_models(config)
+
+        retrieval_models = [m for m in models if m.model_type == "retrieval"]
+        assert len(retrieval_models) == 1
+        assert retrieval_models[0].repo == "intfloat/multilingual-e5-small"
+
+    def test_all_remote_runs_extracts_only_retrieval(self):
+        """Config where every run is remote yields only retrieval models."""
+        data = {
+            "dataset": {"id": "scifact", "name": "scifact"},
+            "run_configs": [
+                {
+                    "run_id": "remote_only",
+                    "retrieval": {
+                        "dataset_id": "scifact",
+                        "model": "intfloat/multilingual-e5-small",
+                        "quantization": "fp16",
+                        "dimensions": 384,
+                    },
+                    "generation": {
+                        "model": "gpt-4o",
+                        "hosting": "remote",
+                        "remote": {
+                            "base_url": "https://api.openai.com/v1",
+                            "api_key_env": "OPENAI_API_KEY",
+                        },
+                    },
+                }
+            ],
+        }
+        config = EvalConfig.model_validate(data)
+        models = extract_required_models(config)
+
+        assert all(m.model_type == "retrieval" for m in models)
+        assert len(models) == 1
