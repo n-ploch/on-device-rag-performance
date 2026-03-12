@@ -73,6 +73,7 @@ class RunConfig(BaseModel):
     retrieval: RetrievalConfig
     generation: GenerationConfig
     limit: int | None = Field(default=None, gt=0, description="Max ground truth entries to evaluate. None = all.")
+    repeat: int | None = Field(default=None, gt=0, description="How many times to repeat this run config (new session ID each time). None = 1.")
 
 
 class GenerateRequest(BaseModel):

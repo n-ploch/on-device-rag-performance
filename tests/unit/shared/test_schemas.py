@@ -209,6 +209,34 @@ class TestRunConfig:
         assert run.retrieval.chunking.chunk_size == 500
         assert run.generation.quantization == "q4_k_m"
 
+    def _minimal_run_config(self, **kwargs) -> RunConfig:
+        return RunConfig(
+            run_id="test",
+            retrieval=RetrievalConfig(dataset_id="d", model="m", quantization="fp16", dimensions=384),
+            generation=GenerationConfig(model="m"),
+            **kwargs,
+        )
+
+    def test_repeat_defaults_to_none(self):
+        """repeat defaults to None when not specified."""
+        run = self._minimal_run_config()
+        assert run.repeat is None
+
+    def test_repeat_valid_positive_int(self):
+        """repeat accepts a positive integer."""
+        run = self._minimal_run_config(repeat=3)
+        assert run.repeat == 3
+
+    def test_repeat_zero_rejected(self):
+        """repeat=0 is rejected."""
+        with pytest.raises(ValidationError):
+            self._minimal_run_config(repeat=0)
+
+    def test_repeat_negative_rejected(self):
+        """Negative repeat is rejected."""
+        with pytest.raises(ValidationError):
+            self._minimal_run_config(repeat=-1)
+
 
 class TestGenerateRequest:
     """Tests for GenerateRequest schema."""
