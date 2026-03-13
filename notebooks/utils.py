@@ -855,11 +855,10 @@ def plot_grouped_bars(
         elif error == "percentile":
             lo = lo_agg.loc[grp, cols].values.astype(float)
             hi = hi_agg.loc[grp, cols].values.astype(float)
-            yerr = _np.array([heights - lo, hi - heights])
-            ax.errorbar(
-                x + offset, heights, yerr=yerr,
-                fmt="none", capsize=4, color=bar_color, linewidth=1.2,
-            )
+            ax.vlines(x + offset, lo, hi, color="black", linewidth=1.2)
+            cap_w = w * 0.3
+            ax.hlines(lo, x + offset - cap_w, x + offset + cap_w, color="black", linewidth=1.2)
+            ax.hlines(hi, x + offset - cap_w, x + offset + cap_w, color="black", linewidth=1.2)
 
     ax.set_xticks(x)
     ax.set_xticklabels(_apply_labels(cols, metric_labels), rotation=45, ha="right", fontsize=8)
