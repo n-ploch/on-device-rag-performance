@@ -11,41 +11,50 @@ import pandas as pd
 # Column groups (filter to present columns at call time)
 # ---------------------------------------------------------------------------
 
-LATENCY_COLS = [
-    "latency_e2e_latency_ms",
-    "latency_ttft_ms",
-    "latency_llm_generation_latency_ms",
-    "latency_retrieval_latency_ms",
-    "latency_predicted_per_token_ms",
-]
+LATENCY_COLS = {
+    "latency_e2e_latency_ms": "E2E Latency (ms)",
+    "latency_ttft_ms": "TTFT (ms)",
+    "latency_llm_generation_latency_ms": "LLM Gen. (ms)",
+    "latency_retrieval_latency_ms": "Retrieval (ms)",
+    "latency_predicted_per_token_ms": "ms / token",
+}
 
-GENERATION_COLS = [
-    "generation_tokens_per_second",
-    "generation_completion_tokens",
-    "generation_prompt_tokens",
-]
+GENERATION_COLS = {
+    "generation_tokens_per_second": "Tokens / sec",
+    "generation_completion_tokens": "Completion tokens",
+    "generation_prompt_tokens": "Prompt tokens",
+}
 
-RETRIEVAL_COLS = [
-    "metrics_recall_at_k",
-    "metrics_precision_at_k",
-    "metrics_mrr",
-]
+RETRIEVAL_COLS = {
+    "metrics_recall_at_k": "Recall@k",
+    "metrics_precision_at_k": "Precision@k",
+    "metrics_mrr": "MRR",
+}
 
-HARDWARE_COLS = [
-    "hardware_max_ram_usage_mb",
-    "hardware_avg_cpu_utilization_pct",
-    "hardware_swap_in_bytes",
-    "hardware_swap_out_bytes",
-]
+HARDWARE_COLS = {
+    "hardware_max_ram_usage_mb": "RAM (MB)",
+    "hardware_avg_cpu_utilization_pct": "CPU (%)",
+    "hardware_swap_in_bytes": "Swap in (B)",
+    "hardware_swap_out_bytes": "Swap out (B)",
+}
 
-GENERATION_QUALITY_COLS = [
-    "score_Correctness",
-    "score_Context Recall",
-    "score_Evaluate Hallucination V2",
-    "score_Faithfulness custom",
-    "metrics_recall_at_k",
-    "metrics_mrr",
-]
+GENERATION_QUALITY_COLS = {
+    "score_Correctness": "Correctness",
+    "score_Context Recall": "Context Recall",
+    "score_Evaluate Hallucination V2": "Hallucination",
+    "score_Faithfulness custom": "Faithfulness",
+    "metrics_recall_at_k": "Recall@k",
+    "metrics_mrr": "MRR",
+}
+
+# Combined labels dict for all metric columns — pass as metric_labels= to any plot function.
+METRIC_LABELS: dict[str, str] = {
+    **LATENCY_COLS,
+    **GENERATION_COLS,
+    **RETRIEVAL_COLS,
+    **HARDWARE_COLS,
+    **GENERATION_QUALITY_COLS,
+}
 
 
 def _present(df: pd.DataFrame, cols: list[str]) -> list[str]:
@@ -286,6 +295,11 @@ def _apply_labels(values: list, labels: dict | None) -> list[str]:
     return [str(labels.get(v, v)) for v in values]
 
 
+def _mlabel(col: str, metric_labels: dict | None) -> str:
+    """Return the display name for a metric column."""
+    return metric_labels.get(col, col) if metric_labels else col
+
+
 import re as _re
 _STAT_RE = _re.compile(r"^p(\d+)$")
 
@@ -326,6 +340,7 @@ def plot_boxplot(
     xlabel: str | None = None,
     ylabel: str | None = None,
     labels: dict | None = None,
+    metric_labels: dict | None = None,
 ) -> tuple:
     """Box plot for one numeric column, one box per group.
 
@@ -355,8 +370,8 @@ def plot_boxplot(
         fig = ax.figure
 
     ax.boxplot(data, tick_labels=tick_labels, vert=True)
-    ax.set_title(title if title is not None else col)
-    ax.set_ylabel(ylabel if ylabel is not None else col)
+    ax.set_title(title if title is not None else _mlabel(col, metric_labels))
+    ax.set_ylabel(ylabel if ylabel is not None else _mlabel(col, metric_labels))
     ax.set_xlabel(xlabel or "")
     ax.set_xticklabels(tick_labels, rotation=45, ha="right")
 
@@ -378,6 +393,7 @@ def plot_boxplots(
     xlabel: str | None = None,
     ylabel: str | None = None,
     labels: dict | None = None,
+    metric_labels: dict | None = None,
 ) -> tuple:
     """Box plots for multiple numeric columns.
 
@@ -422,9 +438,8 @@ def plot_boxplots(
 
     for ax, col in zip(axes_flat, cols):
         plot_boxplot(df, col, group_by=group_by, group_order=group_order, ax=ax,
-                     labels=labels,
-                     ylabel=ylabel,
-                     xlabel=xlabel)
+                     labels=labels, metric_labels=metric_labels,
+                     ylabel=ylabel, xlabel=xlabel)
 
     if title:
         fig.suptitle(title)
@@ -451,6 +466,7 @@ def plot_metrics_grid(
     xlabel: str | None = None,
     ylabel: str | None = None,
     labels: dict | None = None,
+    metric_labels: dict | None = None,
 ) -> tuple:
     """Grid of histograms: rows = groups, columns = metrics.
 
@@ -502,7 +518,7 @@ def plot_metrics_grid(
             data = group_df[col].dropna()
             ax.hist(data, bins=bins)
             if row_idx == 0:
-                ax.set_title(col, fontsize=9)
+                ax.set_title(_mlabel(col, metric_labels), fontsize=9)
             if col_idx == 0:
                 yl = ylabel if ylabel is not None else row_label
                 short = yl[:35] + ("…" if len(yl) > 35 else "")
@@ -661,6 +677,7 @@ def plot_stats_bar(
     xlabel: str | None = None,
     ylabel: str | None = None,
     labels: dict | None = None,
+    metric_labels: dict | None = None,
 ) -> tuple:
     """Bar chart of a statistic for each group, one subplot per metric.
 
@@ -730,8 +747,8 @@ def plot_stats_bar(
 
         ax.set_xticks(x)
         ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=8)
-        ax.set_title(f"{stat}({col})", fontsize=9)
-        ax.set_ylabel(ylabel if ylabel is not None else col)
+        ax.set_title(f"{stat}({_mlabel(col, metric_labels)})", fontsize=9)
+        ax.set_ylabel(ylabel if ylabel is not None else _mlabel(col, metric_labels))
         if xlabel is not None:
             ax.set_xlabel(xlabel)
 
@@ -758,6 +775,7 @@ def plot_grouped_bars(
     xlabel: str | None = None,
     ylabel: str | None = None,
     labels: dict | None = None,
+    metric_labels: dict | None = None,
 ) -> tuple:
     """Grouped bar chart: one cluster per metric, one bar per group.
 
@@ -844,7 +862,7 @@ def plot_grouped_bars(
             )
 
     ax.set_xticks(x)
-    ax.set_xticklabels(cols, rotation=45, ha="right", fontsize=8)
+    ax.set_xticklabels(_apply_labels(cols, metric_labels), rotation=45, ha="right", fontsize=8)
 
     _error_label = (
         f"  [error: ±1 std]" if error == "std"
@@ -878,6 +896,7 @@ def plot_stats_line(
     xlabel: str | None = None,
     ylabel: str | None = None,
     labels: dict | None = None,
+    metric_labels: dict | None = None,
 ) -> tuple:
     """Line plot of a statistic across groups, one subplot per metric.
 
@@ -946,8 +965,8 @@ def plot_stats_line(
 
         ax.set_xticks(x)
         ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=8)
-        ax.set_title(f"{stat}({col})", fontsize=9)
-        ax.set_ylabel(ylabel if ylabel is not None else col)
+        ax.set_title(f"{stat}({_mlabel(col, metric_labels)})", fontsize=9)
+        ax.set_ylabel(ylabel if ylabel is not None else _mlabel(col, metric_labels))
         if xlabel is not None:
             ax.set_xlabel(xlabel)
 
@@ -975,6 +994,7 @@ def plot_stats_multi_line(
     xlabel: str | None = None,
     ylabel: str | None = None,
     labels: dict | None = None,
+    metric_labels: dict | None = None,
 ) -> tuple:
     """Line plot with all metrics overlaid in a single axes, one line per metric.
 
@@ -1038,7 +1058,7 @@ def plot_stats_multi_line(
 
     x = list(range(len(groups)))
     for col in agg.columns:
-        line, = ax.plot(x, agg[col].values, marker="o", linestyle="-", label=col)
+        line, = ax.plot(x, agg[col].values, marker="o", linestyle="-", label=_mlabel(col, metric_labels))
         c = line.get_color()
         if show_band:
             ax.fill_between(x, lo_agg[col].values, hi_agg[col].values,
