@@ -1181,3 +1181,136 @@ def plot_heatmap(
         plt.tight_layout()
         plt.show()
     return fig, ax
+
+
+# ---------------------------------------------------------------------------
+# Dot-line profile grid: one subplot per var2, line+dots across var1
+# ---------------------------------------------------------------------------
+
+
+def plot_dot_profiles(
+    df: pd.DataFrame,
+    metric: str,
+    var1: str = "run_id",
+    var2: str = "claim_id",
+    agg: str = "mean",
+    show_std: bool = False,
+    var1_order: list[str] | None = None,
+    var2_order: list[str] | None = None,
+    sharey: bool = False,
+    figsize_per_row: tuple[float, float] = (8, 1.5),
+    axes=None,
+    title: str | None = None,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    labels: dict | None = None,
+) -> tuple:
+    """Profile grid: one subplot per *var2* value, line + dots across *var1*.
+
+    Each row shows how *metric* varies across *var1* (e.g. run_id) for a
+    single *var2* slice (e.g. claim_id). Optional black error bars show ±1 std
+    computed from multiple observations per (var1, var2) cell.
+
+    Args:
+        df:              DataFrame containing the three relevant columns.
+        metric:          Numeric column to plot.
+        var1:            Column whose unique values become x-axis ticks within
+                         every subplot (default ``"run_id"``).
+        var2:            Column whose unique values each get their own subplot
+                         row (default ``"claim_id"``).
+        agg:             Aggregation per (var1, var2) cell: ``"mean"``,
+                         ``"median"``, ``"min"``, or ``"max"``.
+        show_std:        When True, overlay black ±1 std error bars on each dot.
+        var1_order:      Explicit x-axis order. Defaults to sorted unique values.
+        var2_order:      Explicit subplot row order. Defaults to sorted unique
+                         values.
+        sharey:          Share y-axis across all subplots (useful when metric
+                         values are on the same scale). Defaults to False.
+        figsize_per_row: ``(width, height)`` per subplot row. Total figure
+                         height scales with the number of *var2* values.
+                         Ignored when *axes* is provided.
+        axes:            Flat sequence of existing Axes, one per *var2* value.
+                         When None a new figure is created.
+        title:           Figure suptitle override.
+        xlabel:          Override x-axis label shown on the bottom subplot.
+        ylabel:          Override y-axis label applied to every subplot
+                         (defaults to the var2 value of that row).
+        labels:          Dict mapping raw *var1* values to display tick labels.
+
+    Returns:
+        ``(fig, axes_list)`` tuple where *axes_list* has one entry per *var2*
+        value in the order they appear.
+    """
+    if metric not in df.columns:
+        print(f"Column '{metric}' not found in DataFrame.")
+        return None, None
+
+    agg_fns = {"mean": "mean", "median": "median", "min": "min", "max": "max"}
+    if agg not in agg_fns:
+        raise ValueError(f"Unknown agg '{agg}'. Choose from: {list(agg_fns)}")
+
+    var1_vals = var1_order or sorted(df[var1].dropna().unique().tolist())
+    var2_vals = var2_order or sorted(df[var2].dropna().unique().tolist())
+    n_rows = len(var2_vals)
+    x = _np.arange(len(var1_vals))
+    tick_labels = _apply_labels(var1_vals, labels)
+
+    # Aggregate metric per (var1, var2) cell
+    grouped = df.groupby([var1, var2])[metric]
+    agg_vals = grouped.agg(agg_fns[agg]).unstack(level=0)   # index=var2, cols=var1
+    agg_vals = agg_vals.reindex(index=var2_vals, columns=var1_vals)
+
+    std_vals = None
+    if show_std:
+        std_vals = grouped.std().unstack(level=0).reindex(index=var2_vals, columns=var1_vals)
+
+    standalone = axes is None
+    if standalone:
+        fig, axes_arr = plt.subplots(
+            n_rows, 1,
+            figsize=(figsize_per_row[0], figsize_per_row[1] * n_rows),
+            sharey=sharey,
+            squeeze=False,
+        )
+        axes_flat = list(axes_arr.flatten())
+    else:
+        axes_flat = list(axes)
+        fig = axes_flat[0].figure
+
+    for row_idx, var2_val in enumerate(var2_vals):
+        ax = axes_flat[row_idx]
+        y = agg_vals.loc[var2_val].values.astype(float)
+
+        ax.plot(x, y, linestyle="-", linewidth=0.8, color="steelblue")
+        ax.scatter(x, y, s=18, zorder=3, color="steelblue")
+
+        if show_std and std_vals is not None:
+            yerr = std_vals.loc[var2_val].values.astype(float)
+            ax.errorbar(x, y, yerr=yerr, fmt="none", capsize=3,
+                        color="black", linewidth=0.9, zorder=4)
+
+        short = str(var2_val)
+        short = short[:30] + ("…" if len(short) > 30 else "")
+        ax.set_ylabel(
+            (ylabel if ylabel is not None else short),
+            fontsize=7, rotation=0, ha="right", va="center", labelpad=4,
+        )
+        ax.set_xticks(x)
+        ax.tick_params(axis="x", labelbottom=(row_idx == n_rows - 1), labelsize=7)
+        ax.tick_params(axis="y", labelsize=7)
+        ax.grid(axis="y", linewidth=0.4, alpha=0.5)
+
+    # x-axis labels only on the bottom subplot
+    axes_flat[n_rows - 1].set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=7)
+    axes_flat[n_rows - 1].set_xlabel(xlabel if xlabel is not None else var1)
+
+    if title is not None:
+        fig.suptitle(title)
+    elif standalone:
+        _std_note = "  [±1 std]" if show_std else ""
+        fig.suptitle(f"{agg}({metric})  —  {var2} profiles across {var1}{_std_note}", fontsize=9)
+
+    if standalone:
+        plt.tight_layout()
+        plt.show()
+    return fig, axes_flat[:n_rows]
