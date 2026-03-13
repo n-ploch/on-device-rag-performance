@@ -286,6 +286,30 @@ def _apply_labels(values: list, labels: dict | None) -> list[str]:
     return [str(labels.get(v, v)) for v in values]
 
 
+import re as _re
+_STAT_RE = _re.compile(r"^p(\d+)$")
+
+
+def _resolve_stat(stat: str):
+    """Return a pandas-compatible agg function for *stat*.
+
+    Supports ``"mean"``, ``"median"``, ``"std"``, and percentile notation
+    ``"pN"`` where N is 0–100 (e.g. ``"p90"`` for the 90th percentile).
+    """
+    if stat in ("mean", "median", "std"):
+        return stat
+    m = _STAT_RE.match(stat)
+    if m:
+        n = int(m.group(1))
+        if not 0 <= n <= 100:
+            raise ValueError(f"Percentile must be between 0 and 100, got {n}.")
+        q = n / 100
+        return lambda x: x.quantile(q)
+    raise ValueError(
+        f"Unknown stat '{stat}'. Use 'mean', 'median', 'std', or 'pN' (e.g. 'p90')."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Box plots
 # ---------------------------------------------------------------------------
@@ -664,7 +688,7 @@ def plot_stats_bar(
         return None, None
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
     tick_labels = _apply_labels(groups, labels)
-    agg_fn = {"mean": "mean", "std": "std", "median": "median"}[stat]
+    agg_fn = _resolve_stat(stat)
     subset = df[df[group_by].isin(groups)]
     agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
 
@@ -777,7 +801,7 @@ def plot_grouped_bars(
     n_groups = len(groups)
     subset = df[df[group_by].isin(groups)]
 
-    agg_fn = {"mean": "mean", "median": "median", "std": "std"}[stat]
+    agg_fn = _resolve_stat(stat)
     agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
 
     std_agg = lo_agg = hi_agg = None
@@ -883,7 +907,7 @@ def plot_stats_line(
         return None, None
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
     tick_labels = _apply_labels(groups, labels)
-    agg_fn = {"mean": "mean", "std": "std", "median": "median"}[stat]
+    agg_fn = _resolve_stat(stat)
     subset = df[df[group_by].isin(groups)]
     agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
 
@@ -983,7 +1007,7 @@ def plot_stats_multi_line(
         return None, None
     groups = group_order or sorted(df[group_by].dropna().unique().tolist())
     tick_labels = _apply_labels(groups, labels)
-    agg_fn = {"mean": "mean", "std": "std", "median": "median"}[stat]
+    agg_fn = _resolve_stat(stat)
     subset = df[df[group_by].isin(groups)]
     agg = subset.groupby(group_by)[cols].agg(agg_fn).reindex(groups)
 
