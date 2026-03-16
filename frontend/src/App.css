@@ -1,0 +1,248 @@
+/* ── Reset & base ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: #0f1117;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+/* ── App shell ────────────────────────────────────────────── */
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+
+/* ── Header ───────────────────────────────────────────────── */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.app-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.status-pill { display: flex; gap: 8px; align-items: center; }
+.pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+.pill.loaded  { background: #1a3a2a; color: #4ade80; border: 1px solid #22543d; }
+.pill.empty   { background: #1e1e2e; color: #94a3b8; border: 1px solid #334155; }
+.pill.running { background: #1a2a3a; color: #60a5fa; border: 1px solid #1e40af; animation: pulse 1.5s ease-in-out infinite; }
+
+@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }
+
+/* ── Tab nav ──────────────────────────────────────────────── */
+.tab-nav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #1e293b;
+  margin-bottom: 28px;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 0.9rem;
+  padding: 8px 18px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { color: #e2e8f0; }
+.tab-btn.active { color: #60a5fa; border-bottom-color: #60a5fa; }
+
+/* ── Tab content ──────────────────────────────────────────── */
+.tab-content h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; }
+.hint { font-size: 0.82rem; color: #64748b; margin-bottom: 16px; }
+.hint code { background: #1e293b; padding: 1px 5px; border-radius: 3px; font-size: 0.8rem; }
+
+/* ── Setup tab ────────────────────────────────────────────── */
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.path-input {
+  flex: 1;
+  min-width: 260px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 0.88rem;
+  padding: 8px 12px;
+  outline: none;
+}
+.path-input:focus { border-color: #60a5fa; }
+
+.divider { color: #475569; font-size: 0.85rem; }
+
+.yaml-display { margin-top: 16px; }
+.yaml-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.loaded-badge { color: #4ade80; font-size: 0.82rem; font-weight: 500; }
+
+.yaml-pre {
+  background: #0d1117;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 14px 16px;
+  max-height: 420px;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #94a3b8;
+  scrollbar-width: thin;
+}
+
+/* ── Environment tab ──────────────────────────────────────── */
+.env-grid { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+
+.env-row { display: flex; align-items: center; gap: 12px; }
+
+.env-label {
+  width: 200px;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.env-key-name { font-size: 0.72rem; color: #475569; font-family: monospace; }
+
+.env-input-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.env-input-wrap input {
+  flex: 1;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 0.85rem;
+  padding: 7px 10px;
+  outline: none;
+  font-family: monospace;
+}
+.env-input-wrap input:focus { border-color: #60a5fa; }
+
+.reveal-btn {
+  background: none;
+  border: 1px solid #334155;
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 4px 7px;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+.reveal-btn:hover { border-color: #60a5fa; }
+
+.env-actions { display: flex; align-items: center; gap: 12px; }
+.success-msg { color: #4ade80; font-size: 0.85rem; }
+
+/* ── Run tab ──────────────────────────────────────────────── */
+.run-tab { display: flex; flex-direction: column; align-items: center; }
+.run-tab h2 { align-self: flex-start; }
+
+.run-toggles {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.88rem;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-label input { cursor: pointer; }
+
+.run-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  justify-content: center;
+}
+
+.disabled-reason {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  margin-bottom: 16px;
+}
+
+/* ── Buttons ──────────────────────────────────────────────── */
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 8px 18px;
+  transition: opacity 0.15s, background 0.15s;
+}
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-primary  { background: #2563eb; color: #fff; }
+.btn-primary:hover:not(:disabled)  { background: #1d4ed8; }
+
+.btn-secondary { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+.btn-secondary:hover:not(:disabled) { background: #263548; color: #e2e8f0; }
+
+.btn-stop { background: #7f1d1d; color: #fca5a5; border: 1px solid #991b1b; }
+.btn-stop:hover { background: #991b1b; }
+
+/* generic non-classed button (Save, Load, Browse) */
+button:not(.btn-primary):not(.btn-secondary):not(.btn-stop):not(.tab-btn):not(.reveal-btn) {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+}
+button:not(.btn-primary):not(.btn-secondary):not(.btn-stop):not(.tab-btn):not(.reveal-btn):hover:not(:disabled) {
+  background: #263548;
+}
+
+/* ── Terminal ─────────────────────────────────────────────── */
+.terminal {
+  width: 100%;
+  background: #020817;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 14px 16px;
+  height: 420px;
+  overflow-y: auto;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 transparent;
+}
+
+.terminal-line { color: #4ade80; white-space: pre-wrap; word-break: break-all; }
+.terminal-line.error { color: #f87171; }
+.terminal-placeholder { color: #334155; }
+
+/* ── Shared ───────────────────────────────────────────────── */
+.error-msg { color: #f87171; font-size: 0.82rem; margin-top: 6px; }
