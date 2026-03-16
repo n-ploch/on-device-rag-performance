@@ -34,8 +34,8 @@ RETRIEVAL_COLS = {
 HARDWARE_COLS = {
     "hardware_max_ram_usage_mb": "RAM (MB)",
     "hardware_avg_cpu_utilization_pct": "CPU (%)",
-    "hardware_swap_in_bytes": "Swap in (B)",
-    "hardware_swap_out_bytes": "Swap out (B)",
+    # "hardware_swap_in_bytes": "Swap in (B)",
+    # "hardware_swap_out_bytes": "Swap out (B)",
 }
 
 GENERATION_QUALITY_COLS = {
@@ -676,6 +676,7 @@ def plot_stats_bar(
     title: str | None = None,
     xlabel: str | None = None,
     ylabel: str | None = None,
+    ylim: tuple | None = None,
     labels: dict | None = None,
     metric_labels: dict | None = None,
 ) -> tuple:
@@ -729,13 +730,16 @@ def plot_stats_bar(
     x = list(range(len(groups)))
     for ax, col in zip(axes, agg.columns):
         bars = ax.bar(x, agg[col].values)
+        bar_color = bars[0].get_facecolor()
 
         if show_band:
             lo_vals = lo_agg[col].values
             hi_vals = hi_agg[col].values
-            ax.bar(x, hi_vals - lo_vals, bottom=lo_vals,
-                   color="grey", alpha=0.35,
-                   label=f"p{int(band_percentiles[0])}–p{int(band_percentiles[1])}")
+            stat_vals = agg[col].values
+            yerr = [stat_vals - lo_vals, hi_vals - stat_vals]
+            ax.errorbar(x, stat_vals, yerr=yerr,
+                        fmt="none", capsize=6, color="black", linewidth=1.5,
+                        label=f"p{int(band_percentiles[0])}–p{int(band_percentiles[1])}")
 
         if show_std:
             ax.errorbar(x, agg[col].values, yerr=std_agg[col].values,
@@ -747,10 +751,12 @@ def plot_stats_bar(
 
         ax.set_xticks(x)
         ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=8)
-        ax.set_title(f"{stat}({_mlabel(col, metric_labels)})", fontsize=9)
+        ax.set_title(f"{_mlabel(col, metric_labels)} ({stat})", fontsize=9)
         ax.set_ylabel(ylabel if ylabel is not None else _mlabel(col, metric_labels))
         if xlabel is not None:
             ax.set_xlabel(xlabel)
+        if ylim is not None:
+            ax.set_ylim(ylim)
 
     if title is not None:
         fig.suptitle(title)
@@ -894,6 +900,7 @@ def plot_stats_line(
     title: str | None = None,
     xlabel: str | None = None,
     ylabel: str | None = None,
+    ylim: tuple | None = None,
     labels: dict | None = None,
     metric_labels: dict | None = None,
 ) -> tuple:
@@ -964,10 +971,12 @@ def plot_stats_line(
 
         ax.set_xticks(x)
         ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=8)
-        ax.set_title(f"{stat}({_mlabel(col, metric_labels)})", fontsize=9)
+        ax.set_title(f"{_mlabel(col, metric_labels)} ({stat})", fontsize=9)
         ax.set_ylabel(ylabel if ylabel is not None else _mlabel(col, metric_labels))
         if xlabel is not None:
             ax.set_xlabel(xlabel)
+        if ylim is not None:
+            ax.set_ylim(ylim)
 
     if title is not None:
         fig.suptitle(title)
@@ -992,6 +1001,7 @@ def plot_stats_multi_line(
     title: str | None = None,
     xlabel: str | None = None,
     ylabel: str | None = None,
+    ylim: tuple | None = None,
     labels: dict | None = None,
     metric_labels: dict | None = None,
 ) -> tuple:
@@ -1057,7 +1067,7 @@ def plot_stats_multi_line(
 
     x = list(range(len(groups)))
     for col in agg.columns:
-        line, = ax.plot(x, agg[col].values, marker="o", linestyle="-", label=_mlabel(col, metric_labels))
+        line, = ax.plot(x, agg[col].values, marker="o", linestyle="-", label=f"{_mlabel(col, metric_labels)} ({stat})")
         c = line.get_color()
         if show_band:
             ax.fill_between(x, lo_agg[col].values, hi_agg[col].values,
@@ -1088,6 +1098,8 @@ def plot_stats_multi_line(
             _title += f"  [{', '.join(extras)}]"
     ax.set_title(_title)
     ax.legend(loc="best", fontsize=8)
+    if ylim is not None:
+        ax.set_ylim(ylim)
     if standalone:
         plt.tight_layout()
         plt.show()
@@ -1354,6 +1366,6 @@ def plot_dot_profiles(
         fig.suptitle(f"{agg}({metric})  —  {var2} profiles across {var1}{_std_note}", fontsize=9)
 
     if standalone:
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 1, 0.97])
         plt.show()
     return fig, axes_flat[:n_rows]
