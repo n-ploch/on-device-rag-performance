@@ -1,90 +1,332 @@
 import { useEffect, useRef, useState } from 'react';
-import { startRun } from '../api';
-import type { AppStatus, SSEMessage } from '../types';
+import { startRun, stopRun } from '../api';
+import type {
+  AppStatus,
+  DryRunResultEvent,
+  EntryErrorEvent,
+  EntryResultEvent,
+  RunCompleteEvent,
+  RunEvent,
+  RunStartEvent,
+  StoppedEvent,
+} from '../types';
 
 interface Props {
   status: AppStatus;
+  onBack: () => void;
 }
 
-export function RunTab({ status }: Props) {
-  const [lines, setLines] = useState<string[]>([]);
-  const [verbose, setVerbose] = useState(true);
-  const [showOutput, setShowOutput] = useState(true);
+interface RunState {
+  runStart: RunStartEvent | null;
+  lastResult: EntryResultEvent | null;
+  summary: RunCompleteEvent | null;
+  stopped: StoppedEvent | null;
+  dryRun: DryRunResultEvent | null;
+  entryErrors: EntryErrorEvent[];
+  fatalError: string | null;
+}
+
+const EMPTY_STATE: RunState = {
+  runStart: null,
+  lastResult: null,
+  summary: null,
+  stopped: null,
+  dryRun: null,
+  entryErrors: [],
+  fatalError: null,
+};
+
+function fmt(n: number, decimals = 3) {
+  return n.toFixed(decimals);
+}
+
+function truncate(s: string, max = 300) {
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function ProgressBar({ value, max }: { value: number; max: number }) {
+  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+  return (
+    <div className="progress-bar-wrap">
+      <div className="progress-bar-track">
+        <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="progress-label">
+        {value} / {max} entries ({pct}%)
+      </span>
+    </div>
+  );
+}
+
+function RunHeader({ info }: { info: RunStartEvent }) {
+  return (
+    <div className="progress-card">
+      <div className="progress-card-title">
+        <span className="run-id-badge">{info.run_id}</span>
+        {info.total_configs > 1 && (
+          <span className="dim">
+            Config {info.config_index}/{info.total_configs}
+          </span>
+        )}
+        {info.total_reps > 1 && (
+          <span className="dim">
+            Rep {info.rep}/{info.total_reps}
+          </span>
+        )}
+      </div>
+      <div className="meta-row">
+        <span className="meta-item">
+          <span className="meta-label">Retrieval</span>
+          <span className="meta-value">
+            {info.retrieval_model.split('/').pop()}
+            <span className="quant-badge">{info.retrieval_quantization}</span>
+            · top-{info.k}
+          </span>
+        </span>
+        <span className="meta-item">
+          <span className="meta-label">Generation</span>
+          <span className="meta-value">
+            {info.generation_model.split('/').pop()}
+            <span className="quant-badge">{info.generation_quantization}</span>
+          </span>
+        </span>
+        <span className="meta-item">
+          <span className="meta-label">Langfuse Session ID</span>
+          <span className="meta-value mono">{info.session_id}</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function LastResultCard({ result }: { result: EntryResultEvent }) {
+  const r = result.response;
+  return (
+    <div className="result-card">
+      <div className="result-card-header">
+        <span className="result-entry-badge">Entry #{result.entry_index}</span>
+        <span className="claim-id mono">{result.request.claim_id}</span>
+        {r.is_abstention && <span className="abstention-badge">ABSTAINED</span>}
+      </div>
+
+      <div className="result-section">
+        <div className="result-label">Query</div>
+        <div className="result-text query-text">{truncate(result.request.input, 240)}</div>
+      </div>
+
+      <div className="result-section">
+        <div className="result-label">Response</div>
+        <div className="result-text response-text">{truncate(r.output, 420)}</div>
+      </div>
+
+      <div className="metrics-row">
+        {r.recall_at_k !== null && (
+          <>
+            <div className="metric-chip">
+              <span className="metric-name">Recall@k</span>
+              <span className="metric-value">{fmt(r.recall_at_k)}</span>
+            </div>
+            <div className="metric-chip">
+              <span className="metric-name">Precision@k</span>
+              <span className="metric-value">{fmt(r.precision_at_k!)}</span>
+            </div>
+            <div className="metric-chip">
+              <span className="metric-name">MRR</span>
+              <span className="metric-value">{fmt(r.mrr!)}</span>
+            </div>
+          </>
+        )}
+        <div className="metric-chip perf">
+          <span className="metric-name">Latency</span>
+          <span className="metric-value">{r.latency_ms.toFixed(0)} ms</span>
+        </div>
+        <div className="metric-chip perf">
+          <span className="metric-name">Speed</span>
+          <span className="metric-value">{r.tokens_per_second.toFixed(1)} tok/s</span>
+        </div>
+        <div className="metric-chip perf">
+          <span className="metric-name">RAM</span>
+          <span className="metric-value">{r.ram_mb.toFixed(0)} MB</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({ summary }: { summary: RunCompleteEvent }) {
+  return (
+    <div className="summary-card">
+      <div className="summary-title">Run complete — {summary.run_id}</div>
+      <div className="metrics-row">
+        <div className="metric-chip summary-chip">
+          <span className="metric-name">Avg Recall@k</span>
+          <span className="metric-value">{fmt(summary.avg_recall)}</span>
+        </div>
+        <div className="metric-chip summary-chip">
+          <span className="metric-name">Avg Precision@k</span>
+          <span className="metric-value">{fmt(summary.avg_precision)}</span>
+        </div>
+        <div className="metric-chip summary-chip">
+          <span className="metric-name">Avg MRR</span>
+          <span className="metric-value">{fmt(summary.avg_mrr)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DryRunCard({ result }: { result: DryRunResultEvent }) {
+  return (
+    <div className="dry-run-card">
+      <div className="dry-run-title">Dry run validated</div>
+      <p>
+        Ready to evaluate <strong>{result.total_entries}</strong> entries across{' '}
+        <strong>{result.total_configs}</strong> config{result.total_configs !== 1 ? 's' : ''}.
+      </p>
+      <div className="dry-run-ids">
+        {result.run_ids.map((id) => (
+          <span key={id} className="run-id-badge">{id}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StoppedCard({ ev }: { ev: StoppedEvent }) {
+  return (
+    <div className="stopped-card">
+      <div className="stopped-title">
+        Stopped — {ev.run_id}
+      </div>
+      <p className="stopped-subtitle">
+        Completed {ev.completed_entries} of {ev.total_entries} entries before stopping.
+      </p>
+      {ev.total > 0 && (
+        <div className="metrics-row">
+          <div className="metric-chip summary-chip">
+            <span className="metric-name">Avg Recall@k</span>
+            <span className="metric-value">{fmt(ev.avg_recall)}</span>
+          </div>
+          <div className="metric-chip summary-chip">
+            <span className="metric-name">Avg Precision@k</span>
+            <span className="metric-value">{fmt(ev.avg_precision)}</span>
+          </div>
+          <div className="metric-chip summary-chip">
+            <span className="metric-name">Avg MRR</span>
+            <span className="metric-value">{fmt(ev.avg_mrr)}</span>
+          </div>
+          <div className="metric-chip summary-chip">
+            <span className="metric-name">Abstentions</span>
+            <span className="metric-value">{ev.abstentions}/{ev.total}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ErrorBox({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="error-box">
+      <span className="error-box-icon">⚠</span>
+      <div>
+        <div className="error-box-title">{title}</div>
+        <div className="error-box-msg">{message}</div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export function RunTab({ status, onBack }: Props) {
+  const [runState, setRunState] = useState<RunState>(EMPTY_STATE);
   const [running, setRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const terminalRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll terminal to bottom on new output
-  useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-    }
-  }, [lines]);
-
-  // Sync running state with global status (e.g. after page reload)
   useEffect(() => {
     setRunning(status.is_running);
   }, [status.is_running]);
 
-  function handleMessage(msg: SSEMessage) {
-    if (msg.type === 'log') {
-      setLines((l) => [...l, msg.text]);
-    } else if (msg.type === 'error') {
-      setLines((l) => [...l, `ERROR: ${msg.text}`]);
+  function handleEvent(event: RunEvent) {
+    switch (event.type) {
+      case 'run_start':
+        setRunState((s) => ({
+          ...s,
+          runStart: event,
+          lastResult: null,
+          summary: null,
+          stopped: null,
+          dryRun: null,
+          fatalError: null,
+        }));
+        break;
+      case 'entry_result':
+        setRunState((s) => ({ ...s, lastResult: event }));
+        break;
+      case 'entry_error':
+        setRunState((s) => ({ ...s, entryErrors: [...s.entryErrors, event] }));
+        break;
+      case 'run_complete':
+        setRunState((s) => ({ ...s, summary: event }));
+        break;
+      case 'stopped':
+        setRunState((s) => ({ ...s, stopped: event }));
+        break;
+      case 'dry_run_result':
+        setRunState((s) => ({ ...s, dryRun: event }));
+        break;
+      case 'error':
+        setRunState((s) => ({ ...s, fatalError: event.message }));
+        break;
+      case 'done':
+        break;
     }
   }
 
-  function handleDone() {
-    setRunning(false);
-  }
-
-  function handleError(err: string) {
-    setLines((l) => [...l, `ERROR: ${err}`]);
-  }
-
   function handleRun(dryRun: boolean) {
-    setLines([]);
+    setRunState({ ...EMPTY_STATE });
     setRunning(true);
-    abortRef.current = startRun(dryRun, verbose, handleMessage, handleDone, handleError);
+    setStopping(false);
+    abortRef.current = startRun(
+      dryRun,
+      handleEvent,
+      () => { setRunning(false); setStopping(false); },
+      (msg) => setRunState((s) => ({ ...s, fatalError: msg })),
+    );
   }
 
-  function handleStop() {
-    abortRef.current?.abort();
-    setRunning(false);
-    setLines((l) => [...l, '— run cancelled —']);
+  async function handleStop() {
+    setStopping(true);
+    try {
+      await stopRun();
+    } catch {
+      // If the call fails the stream will still close eventually
+      setStopping(false);
+    }
   }
 
   const canRun = status.config_loaded && !running;
   const disabledReason = !status.config_loaded
     ? 'Load a config in the Setup tab first.'
-    : running
-    ? 'Evaluation in progress…'
     : '';
 
-  return (
-    <div className="tab-content run-tab">
-      <h2>Run Evaluation</h2>
+  const { runStart, lastResult, summary, dryRun, entryErrors, fatalError } = runState;
+  const hasAnyOutput = runStart || dryRun || fatalError;
 
-      <div className="run-toggles">
-        <label className="toggle-label">
-          <input
-            type="checkbox"
-            checked={showOutput}
-            onChange={(e) => setShowOutput(e.target.checked)}
-          />
-          Show Output
-        </label>
-        <label className="toggle-label">
-          <input
-            type="checkbox"
-            checked={verbose}
-            onChange={(e) => setVerbose(e.target.checked)}
-          />
-          Verbose
-        </label>
+  return (
+    <div className="tab-content">
+      <div className="tab-top-nav">
+        <button className="btn-back" onClick={onBack}>← Back</button>
       </div>
 
-      <div className="run-buttons">
+      <h2>Run Evaluation</h2>
+
+      {/* Controls */}
+      <div className="run-controls">
         <button
           className="btn-primary"
           onClick={() => handleRun(false)}
@@ -102,30 +344,53 @@ export function RunTab({ status }: Props) {
           Dry Run
         </button>
         {running && (
-          <button className="btn-stop" onClick={handleStop}>
-            ■ Stop
+          <button className="btn-stop" onClick={handleStop} disabled={stopping}>
+            {stopping ? '⏳ Stopping…' : '■ Stop'}
           </button>
         )}
       </div>
 
-      {disabledReason && !running && (
+      {disabledReason && (
         <p className="disabled-reason">{disabledReason}</p>
       )}
 
-      {showOutput && (
-        <div ref={terminalRef} className="terminal">
-          {lines.length === 0 ? (
-            <span className="terminal-placeholder">Output will appear here…</span>
-          ) : (
-            lines.map((line, i) => (
-              <div
-                key={i}
-                className={line.startsWith('ERROR') ? 'terminal-line error' : 'terminal-line'}
-              >
-                {line}
-              </div>
-            ))
-          )}
+      {/* Progress section */}
+      {runStart && (
+        <div className="progress-section">
+          <RunHeader info={runStart} />
+          <ProgressBar
+            value={lastResult?.entry_index ?? 0}
+            max={runStart.total_entries}
+          />
+        </div>
+      )}
+
+      {/* Last result */}
+      {lastResult && <LastResultCard result={lastResult} />}
+
+      {/* Summary or stopped partial summary */}
+      {summary && <SummaryCard summary={summary} />}
+      {runState.stopped && <StoppedCard ev={runState.stopped} />}
+
+      {/* Dry run result */}
+      {dryRun && <DryRunCard result={dryRun} />}
+
+      {/* Entry errors */}
+      {entryErrors.map((e) => (
+        <ErrorBox
+          key={`${e.entry_index}-${e.claim_id}`}
+          title={`Entry #${e.entry_index} failed — ${e.claim_id}`}
+          message={e.message}
+        />
+      ))}
+
+      {/* Fatal error */}
+      {fatalError && <ErrorBox title="Error" message={fatalError} />}
+
+      {/* Idle placeholder */}
+      {!hasAnyOutput && !running && (
+        <div className="run-idle">
+          <p>Press <strong>Run</strong> to start an evaluation or <strong>Dry Run</strong> to validate the config.</p>
         </div>
       )}
     </div>

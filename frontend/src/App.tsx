@@ -14,16 +14,21 @@ const DEFAULT_STATUS: AppStatus = {
   is_running: false,
 };
 
+const TAB_LABELS: Record<Tab, string> = {
+  setup: 'Load Config',
+  env: 'Environment',
+  run: 'Run',
+};
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('setup');
   const [status, setStatus] = useState<AppStatus>(DEFAULT_STATUS);
 
-  // Poll /api/status every 2 s so Run tab buttons stay in sync
   useEffect(() => {
     const refresh = () =>
       getStatus()
         .then(setStatus)
-        .catch(() => {/* api not yet reachable */});
+        .catch(() => {});
     refresh();
     const id = setInterval(refresh, 2000);
     return () => clearInterval(id);
@@ -32,6 +37,8 @@ export default function App() {
   function onConfigLoaded() {
     setStatus((s) => ({ ...s, config_loaded: true }));
   }
+
+  const tabs: Tab[] = ['setup', 'env', 'run'];
 
   return (
     <div className="app">
@@ -50,22 +57,37 @@ export default function App() {
       </header>
 
       <nav className="tab-nav">
-        {(['setup', 'env', 'run'] as Tab[]).map((t, i) => (
+        {tabs.map((t, i) => (
           <button
             key={t}
             className={`tab-btn ${tab === t ? 'active' : ''}`}
             onClick={() => setTab(t)}
           >
-            {i + 1}.{' '}
-            {t === 'setup' ? 'Setup' : t === 'env' ? 'Environment' : 'Run'}
+            {i + 1}. {TAB_LABELS[t]}
           </button>
         ))}
       </nav>
 
       <main className="tab-panel">
-        {tab === 'setup' && <SetupTab onConfigLoaded={onConfigLoaded} />}
-        {tab === 'env' && <EnvTab />}
-        {tab === 'run' && <RunTab status={status} />}
+        {tab === 'setup' && (
+          <SetupTab
+            onConfigLoaded={onConfigLoaded}
+            configLoaded={status.config_loaded}
+            onNext={() => setTab('env')}
+          />
+        )}
+        {tab === 'env' && (
+          <EnvTab
+            onBack={() => setTab('setup')}
+            onNext={() => setTab('run')}
+          />
+        )}
+        {tab === 'run' && (
+          <RunTab
+            status={status}
+            onBack={() => setTab('env')}
+          />
+        )}
       </main>
     </div>
   );

@@ -1,4 +1,4 @@
-import type { AppStatus, ConfigLoadResponse, EnvValues, SSEMessage } from './types';
+import type { AppStatus, ConfigLoadResponse, EnvValues, RunEvent } from './types';
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -36,18 +36,21 @@ export async function getStatus(): Promise<AppStatus> {
   return res.json();
 }
 
+export async function stopRun(): Promise<void> {
+  await post('/api/stop', {});
+}
+
 /**
- * Start a run (or dry run) and stream log lines back.
+ * Start a run (or dry run) and stream structured progress events back.
  *
  * Uses fetch + ReadableStream because EventSource only supports GET requests.
  * Returns an AbortController the caller can use to cancel the stream.
  */
 export function startRun(
   dryRun: boolean,
-  verbose: boolean,
-  onMessage: (msg: SSEMessage) => void,
+  onEvent: (event: RunEvent) => void,
   onDone: () => void,
-  onError: (err: string) => void,
+  onFatalError: (msg: string) => void,
 ): AbortController {
   const controller = new AbortController();
   const endpoint = dryRun ? '/api/dry-run' : '/api/run';
@@ -58,12 +61,12 @@ export function startRun(
       res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verbose }),
+        body: JSON.stringify({}),
         signal: controller.signal,
       });
     } catch (err: unknown) {
       if ((err as Error).name !== 'AbortError') {
-        onError(String(err));
+        onFatalError(String(err));
         onDone();
       }
       return;
@@ -71,7 +74,7 @@ export function startRun(
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({ detail: res.statusText }));
-      onError(data.detail ?? res.statusText);
+      onFatalError(data.detail ?? res.statusText);
       onDone();
       return;
     }
@@ -90,9 +93,9 @@ export function startRun(
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           try {
-            const msg: SSEMessage = JSON.parse(line.slice(6));
-            onMessage(msg);
-            if (msg.type === 'done') {
+            const event: RunEvent = JSON.parse(line.slice(6));
+            onEvent(event);
+            if (event.type === 'done') {
               onDone();
               return;
             }
@@ -103,7 +106,7 @@ export function startRun(
       }
     } catch (err: unknown) {
       if ((err as Error).name !== 'AbortError') {
-        onError(String(err));
+        onFatalError(String(err));
       }
     } finally {
       onDone();

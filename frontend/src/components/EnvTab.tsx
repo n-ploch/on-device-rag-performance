@@ -17,17 +17,24 @@ const EMPTY_ENV: EnvValues = {
   GENERATION_PORT: '',
 };
 
-export function EnvTab() {
+interface Props {
+  onBack: () => void;
+  onNext: () => void;
+}
+
+export function EnvTab({ onBack, onNext }: Props) {
   const [values, setValues] = useState<EnvValues>(EMPTY_ENV);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
-  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
     getEnv()
       .then((v) => setValues(v))
-      .catch(() => {/* api not yet running */});
+      .catch(() => {});
   }, []);
+
+  const allSet = Object.values(values).every((v) => v.trim() !== '');
 
   function toggleReveal(key: string) {
     setRevealed((prev) => {
@@ -38,15 +45,15 @@ export function EnvTab() {
   }
 
   async function handleSave() {
-    setStatus('saving');
+    setSaveStatus('saving');
     setErrorMsg('');
     try {
       await saveEnv(values);
-      setStatus('saved');
-      setTimeout(() => setStatus('idle'), 2000);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (e: unknown) {
       setErrorMsg(String(e));
-      setStatus('error');
+      setSaveStatus('error');
     }
   }
 
@@ -54,6 +61,10 @@ export function EnvTab() {
 
   return (
     <div className="tab-content">
+      <div className="tab-top-nav">
+        <button className="btn-back" onClick={onBack}>← Back</button>
+      </div>
+
       <h2>Environment Variables</h2>
       <p className="hint">
         Values are applied to the running API process for this session only. Restart the
@@ -64,6 +75,7 @@ export function EnvTab() {
         {keys.map((key) => {
           const isSensitive = SENSITIVE_KEYS.has(key);
           const isRevealed = revealed.has(key);
+          const isEmpty = !values[key].trim();
           return (
             <div key={key} className="env-row">
               <label htmlFor={key} className="env-label">
@@ -77,6 +89,7 @@ export function EnvTab() {
                   value={values[key]}
                   onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
                   placeholder={isSensitive ? '••••••••' : '(not set)'}
+                  className={isEmpty ? 'input-empty' : ''}
                   autoComplete="off"
                 />
                 {isSensitive && (
@@ -96,11 +109,23 @@ export function EnvTab() {
       </div>
 
       <div className="env-actions">
-        <button onClick={handleSave} disabled={status === 'saving'}>
-          {status === 'saving' ? 'Saving…' : 'Save'}
+        <button onClick={handleSave} disabled={saveStatus === 'saving'}>
+          {saveStatus === 'saving' ? 'Saving…' : 'Save'}
         </button>
-        {status === 'saved' && <span className="success-msg">✓ Saved</span>}
-        {status === 'error' && <span className="error-msg">{errorMsg}</span>}
+        {saveStatus === 'saved' && <span className="success-msg">✓ Saved</span>}
+        {saveStatus === 'error' && <span className="error-msg">{errorMsg}</span>}
+      </div>
+
+      <div className="tab-nav-actions">
+        <button
+          className={allSet ? 'btn-next btn-next-ready' : 'btn-next'}
+          onClick={onNext}
+        >
+          Next: Run →
+        </button>
+        {!allSet && (
+          <span className="nav-hint">Fill in all environment variables to continue</span>
+        )}
       </div>
     </div>
   );

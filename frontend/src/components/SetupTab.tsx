@@ -3,9 +3,11 @@ import { loadConfigFromContent, loadConfigFromPath } from '../api';
 
 interface Props {
   onConfigLoaded: () => void;
+  configLoaded: boolean;
+  onNext: () => void;
 }
 
-export function SetupTab({ onConfigLoaded }: Props) {
+export function SetupTab({ onConfigLoaded, configLoaded, onNext }: Props) {
   const [pathInput, setPathInput] = useState('');
   const [yamlText, setYamlText] = useState('');
   const [error, setError] = useState('');
@@ -51,7 +53,6 @@ export function SetupTab({ onConfigLoaded }: Props) {
         setError(String(ex));
       } finally {
         setLoading(false);
-        // reset input so the same file can be re-loaded
         if (fileRef.current) fileRef.current.value = '';
       }
     };
@@ -60,7 +61,7 @@ export function SetupTab({ onConfigLoaded }: Props) {
 
   return (
     <div className="tab-content">
-      <h2>Configuration</h2>
+      <h2>Load Config</h2>
 
       <div className="input-row">
         <input
@@ -97,6 +98,18 @@ export function SetupTab({ onConfigLoaded }: Props) {
           <pre className="yaml-pre"><code>{yamlText}</code></pre>
         </div>
       )}
+
+      <div className="tab-nav-actions">
+        <button
+          className={configLoaded ? 'btn-next btn-next-ready' : 'btn-next'}
+          onClick={onNext}
+        >
+          Next: Environment →
+        </button>
+        {!configLoaded && (
+          <span className="nav-hint">Load a config file to continue</span>
+        )}
+      </div>
     </div>
   );
 }

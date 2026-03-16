@@ -2,7 +2,7 @@
 
 Wraps the existing orchestrator/runner logic to expose a local web API,
 enabling the browser-based frontend to load configs, set env vars, and
-stream evaluation output.
+stream structured evaluation progress.
 
 Usage:
     uvicorn orchestrator.api:app --port 8080
@@ -16,8 +16,10 @@ import asyncio
 import json
 import logging
 import os
-from dataclasses import dataclass, field
+import dataclasses
+from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 import yaml
 from dotenv import load_dotenv
@@ -32,12 +34,14 @@ load_dotenv()
 from orchestrator.config import EvalConfig  # noqa: E402
 from orchestrator.orchestrator import Orchestrator  # noqa: E402
 from orchestrator.runner import (  # noqa: E402
-    _run_configs_loop,
+    EvaluationResult,
     configure_logging,
     ensure_dataset,
+    evaluate_single,
     load_ground_truth,
 )
 from orchestrator.tracing import setup_tracing, shutdown_tracing  # noqa: E402
+from shared_types.schemas import RunConfig  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +74,7 @@ class _AppState:
     config: EvalConfig | None = None
     config_yaml_text: str = ""
     run_task: asyncio.Task | None = None  # type: ignore[type-arg]
+    stop_event: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
 
 
 # ---------------------------------------------------------------------------
@@ -117,7 +122,7 @@ class EnvUpdateResponse(BaseModel):
 
 
 class RunRequest(BaseModel):
-    verbose: bool = False
+    pass  # no parameters needed — progress events carry all info
 
 
 class StatusResponse(BaseModel):
@@ -127,87 +132,215 @@ class StatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# SSE log capture
+# SSE event helpers
 # ---------------------------------------------------------------------------
 
-
-class _QueueLogHandler(logging.Handler):
-    """Routes log records into an asyncio.Queue for SSE streaming."""
-
-    def __init__(self, queue: asyncio.Queue[str | None]) -> None:
-        super().__init__()
-        self._queue = queue
-        self._loop = asyncio.get_event_loop()
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            msg = self.format(record)
-            # call_soon_threadsafe because OTEL's BatchSpanProcessor uses threads
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, msg)
-        except Exception:
-            self.handleError(record)
+# The queue carries JSON strings; None is the sentinel that signals completion.
+_Queue = asyncio.Queue  # type: ignore[type-arg]
 
 
-async def _sse_generator(
-    queue: asyncio.Queue[str | None],
-    task: asyncio.Task,  # type: ignore[type-arg]
-):
-    """Yield SSE-formatted events from the log queue until the task finishes."""
+async def _emit(queue: _Queue, event: dict) -> None:  # type: ignore[type-arg]
+    await queue.put(json.dumps(event))
+
+
+async def _sse_generator(queue: _Queue, task: asyncio.Task):  # type: ignore[type-arg]
+    """Forward structured JSON events from the queue as SSE data frames."""
     while True:
         try:
             msg = await asyncio.wait_for(queue.get(), timeout=1.0)
             if msg is None:
-                # Sentinel: evaluation task finished cleanly
+                # Sentinel: evaluation task exited cleanly
                 break
-            yield {"data": json.dumps({"type": "log", "text": msg})}
+            yield {"data": msg}
         except asyncio.TimeoutError:
             if task.done():
                 exc = task.exception()
                 if exc:
-                    yield {"data": json.dumps({"type": "error", "text": str(exc)})}
+                    yield {"data": json.dumps({"type": "error", "message": str(exc)})}
                 break
-            # Keep-alive comment to prevent proxy timeouts
             yield {"comment": "keep-alive"}
 
     yield {"data": json.dumps({"type": "done"})}
 
 
 # ---------------------------------------------------------------------------
-# Core evaluation runner (accepts pre-parsed EvalConfig, no file I/O)
+# Progress-aware evaluation loop (does not modify runner.py)
 # ---------------------------------------------------------------------------
 
 
-async def _run_from_config(
+def _summary_metrics(results: list[EvaluationResult]) -> dict:  # type: ignore[type-arg]
+    with_metrics = [r for r in results if r.recall_at_k is not None]
+    if with_metrics:
+        avg_recall = sum(r.recall_at_k for r in with_metrics) / len(with_metrics)  # type: ignore[misc]
+        avg_precision = sum(r.precision_at_k for r in with_metrics) / len(with_metrics)  # type: ignore[misc]
+        avg_mrr = sum(r.mrr for r in with_metrics) / len(with_metrics)  # type: ignore[misc]
+    else:
+        avg_recall = avg_precision = avg_mrr = 0.0
+    return {
+        "avg_recall": round(avg_recall, 4),
+        "avg_precision": round(avg_precision, 4),
+        "avg_mrr": round(avg_mrr, 4),
+        "abstentions": sum(1 for r in results if r.is_abstention),
+        "total": len(results),
+    }
+
+
+async def _run_configs_loop_with_progress(
+    run_configs: list[RunConfig],
+    orchestrator: Orchestrator,
+    entries: list,
+    tracer,
+    queue: _Queue,
+    stop_event: asyncio.Event,
+) -> None:
+    """Evaluation loop that emits structured progress events to *queue*.
+
+    After each entry completes (never mid-request), checks *stop_event*.
+    If set, emits a ``stopped`` event with a partial summary and returns.
+    """
+    total_configs = len(run_configs)
+
+    for config_idx, run_config in enumerate(run_configs):
+        await orchestrator.prepare_run_config(run_config)
+
+        repeat_count = run_config.repeat if run_config.repeat is not None else 1
+
+        for rep in range(repeat_count):
+            session_id = f"{run_config.run_id}_{uuid4().hex[:8]}"
+            run_entries = (
+                entries[: run_config.limit]
+                if run_config.limit is not None
+                else entries
+            )
+            total_entries = len(run_entries)
+
+            gen_cfg = run_config.generation
+            gen_model = (
+                gen_cfg.remote.base_url
+                if gen_cfg.hosting == "remote" and gen_cfg.remote
+                else gen_cfg.model
+            )
+
+            await _emit(
+                queue,
+                {
+                    "type": "run_start",
+                    "run_id": run_config.run_id,
+                    "config_index": config_idx + 1,
+                    "total_configs": total_configs,
+                    "rep": rep + 1,
+                    "total_reps": repeat_count,
+                    "session_id": session_id,
+                    "total_entries": total_entries,
+                    "retrieval_model": run_config.retrieval.model,
+                    "retrieval_quantization": run_config.retrieval.quantization,
+                    "generation_model": gen_model,
+                    "generation_quantization": run_config.generation.quantization,
+                    "k": run_config.retrieval.k,
+                },
+            )
+
+            results: list[EvaluationResult] = []
+
+            for entry_idx, entry in enumerate(run_entries):
+                try:
+                    result = await evaluate_single(
+                        orchestrator._client,  # type: ignore[arg-type]
+                        entry,
+                        run_config,
+                        tracer,
+                        session_id,
+                    )
+                    results.append(result)
+
+                    inf = result.response.inference_measurement
+                    hw = result.response.hardware_measurement
+
+                    await _emit(
+                        queue,
+                        {
+                            "type": "entry_result",
+                            "entry_index": entry_idx + 1,
+                            "total_entries": total_entries,
+                            "run_id": run_config.run_id,
+                            "request": {
+                                "claim_id": entry.id,
+                                "input": entry.input,
+                            },
+                            "response": {
+                                "output": result.response.output,
+                                "recall_at_k": result.recall_at_k,
+                                "precision_at_k": result.precision_at_k,
+                                "mrr": result.mrr,
+                                "is_abstention": result.is_abstention,
+                                "latency_ms": inf.e2e_latency_ms,
+                                "tokens_per_second": inf.tokens_per_second,
+                                "ram_mb": hw.max_ram_usage_mb,
+                            },
+                        },
+                    )
+
+                except Exception as exc:
+                    await _emit(
+                        queue,
+                        {
+                            "type": "entry_error",
+                            "entry_index": entry_idx + 1,
+                            "claim_id": entry.id,
+                            "message": str(exc),
+                        },
+                    )
+
+                # Check stop signal after each entry (never mid-request)
+                if stop_event.is_set():
+                    await _emit(
+                        queue,
+                        {
+                            "type": "stopped",
+                            "run_id": run_config.run_id,
+                            "completed_entries": entry_idx + 1,
+                            "total_entries": total_entries,
+                            **_summary_metrics(results),
+                        },
+                    )
+                    return
+
+            await _emit(
+                queue,
+                {
+                    "type": "run_complete",
+                    "run_id": run_config.run_id,
+                    **_summary_metrics(results),
+                },
+            )
+
+
+async def _run_with_progress(
     config: EvalConfig,
-    queue: asyncio.Queue[str | None],
+    queue: _Queue,
+    stop_event: asyncio.Event,
     dry_run: bool = False,
     run_id_filter: str | None = None,
-    log_level: int = logging.INFO,
 ) -> None:
-    """Mirror of runner._run() that accepts a pre-parsed EvalConfig.
+    """Main evaluation coroutine for the API.
 
-    All log output is routed to *queue* via _QueueLogHandler.
-    A ``None`` sentinel is placed in the queue when this coroutine exits.
+    Emits structured events; places a None sentinel in the queue when done.
     """
-    handler = _QueueLogHandler(queue)
-    handler.setFormatter(
-        logging.Formatter(
-            fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
-            datefmt="%H:%M:%S",
-        )
-    )
-    # Replace root handlers so all log output goes to the SSE queue
-    configure_logging(level=log_level, print_logs=False, sys_logs_path=None)
-    root = logging.getLogger()
-    root.handlers.clear()
-    root.addHandler(handler)
+    # Suppress chatty library logs — errors are caught and emitted as events
+    configure_logging(level=logging.WARNING, print_logs=False, sys_logs_path=None)
 
     try:
         run_configs = config.run_configs
         if run_id_filter:
             run_configs = [rc for rc in run_configs if rc.run_id == run_id_filter]
             if not run_configs:
-                logger.error("No run config found with run_id=%s", run_id_filter)
+                await _emit(
+                    queue,
+                    {
+                        "type": "error",
+                        "message": f"No run config found with run_id='{run_id_filter}'.",
+                    },
+                )
                 return
 
         async with Orchestrator(config) as orchestrator:
@@ -216,36 +349,39 @@ async def _run_from_config(
             if dry_run:
                 validation = orchestrator.validate_dataset()
                 entries = load_ground_truth(validation.ground_truth_path)
-                logger.info(
-                    "Dry run complete. Would evaluate %d entries x %d configs.",
-                    len(entries),
-                    len(run_configs),
+                await _emit(
+                    queue,
+                    {
+                        "type": "dry_run_result",
+                        "total_entries": len(entries),
+                        "total_configs": len(run_configs),
+                        "run_ids": [rc.run_id for rc in run_configs],
+                    },
                 )
                 return
 
             await orchestrator.validate_global_prerequisites()
-
             validation = orchestrator.validate_dataset()
             entries = load_ground_truth(validation.ground_truth_path)
-            logger.info("Loaded %d ground truth entries", len(entries))
 
             tracer = setup_tracing()
             try:
-                await _run_configs_loop(
+                await _run_configs_loop_with_progress(
                     run_configs=run_configs,
                     orchestrator=orchestrator,
                     entries=entries,
                     tracer=tracer,
-                    quiet=True,  # progress via logging, not print()
+                    queue=queue,
+                    stop_event=stop_event,
                 )
             finally:
                 shutdown_tracing()
 
     except Exception as exc:
-        logger.error("Evaluation failed: %s", exc, exc_info=True)
+        await _emit(queue, {"type": "error", "message": str(exc)})
         raise
     finally:
-        await queue.put(None)  # sentinel: tells the SSE generator to close
+        await queue.put(None)  # sentinel
 
 
 # ---------------------------------------------------------------------------
@@ -254,19 +390,13 @@ async def _run_from_config(
 
 
 def _check_run_preconditions(state: _AppState, dry_run: bool = False) -> None:
-    """Raise HTTP 422/409 for the most common misconfiguration cases."""
     if state.config is None:
         raise HTTPException(
             status_code=422,
             detail="Please load a configuration file in the Setup tab first.",
         )
-
     if state.run_task is not None and not state.run_task.done():
-        raise HTTPException(
-            status_code=409,
-            detail="An evaluation is already running.",
-        )
-
+        raise HTTPException(status_code=409, detail="An evaluation is already running.")
     if not dry_run and state.config.observability.langfuse:
         missing = [
             k
@@ -291,18 +421,9 @@ def _check_run_preconditions(state: _AppState, dry_run: bool = False) -> None:
 
 @app.post("/api/config/load", response_model=ConfigLoadResponse)
 async def load_config(req: ConfigLoadRequest) -> ConfigLoadResponse:
-    """Load and validate a YAML evaluation config.
-
-    Accepts either a server-side file path or raw YAML content (from the
-    browser file picker).
-    """
     state: _AppState = app.state.data
-
     if not req.path and not req.content:
-        raise HTTPException(
-            status_code=422, detail="Provide either 'path' or 'content'."
-        )
-
+        raise HTTPException(status_code=422, detail="Provide either 'path' or 'content'.")
     try:
         if req.content:
             yaml_text = req.content
@@ -312,12 +433,10 @@ async def load_config(req: ConfigLoadRequest) -> ConfigLoadResponse:
             config_path = Path(req.path)  # type: ignore[arg-type]
             if not config_path.exists():
                 return ConfigLoadResponse(
-                    ok=False,
-                    error=f"File not found: {config_path.resolve()}",
+                    ok=False, error=f"File not found: {config_path.resolve()}"
                 )
             yaml_text = config_path.read_text()
             config = EvalConfig.from_yaml(config_path)
-
     except yaml.YAMLError as exc:
         return ConfigLoadResponse(ok=False, error=f"YAML parse error: {exc}")
     except ValidationError as exc:
@@ -328,23 +447,17 @@ async def load_config(req: ConfigLoadRequest) -> ConfigLoadResponse:
     state.config = config
     state.config_yaml_text = yaml_text
     return ConfigLoadResponse(
-        ok=True,
-        config=config.model_dump(mode="json"),
-        yaml_text=yaml_text,
+        ok=True, config=config.model_dump(mode="json"), yaml_text=yaml_text
     )
 
 
 @app.get("/api/env", response_model=EnvResponse)
 async def get_env() -> EnvResponse:
-    """Return current values of all known orchestrator env keys."""
-    return EnvResponse(
-        values={k: os.environ.get(k, "") for k in ENV_KEYS}
-    )
+    return EnvResponse(values={k: os.environ.get(k, "") for k in ENV_KEYS})
 
 
 @app.post("/api/env", response_model=EnvUpdateResponse)
 async def update_env(req: EnvUpdateRequest) -> EnvUpdateResponse:
-    """Write env var values to os.environ for this session."""
     for k, v in req.values.items():
         if k in ENV_KEYS:
             if v:
@@ -356,51 +469,52 @@ async def update_env(req: EnvUpdateRequest) -> EnvUpdateResponse:
 
 @app.post("/api/run")
 async def run_evaluation(req: RunRequest):
-    """Start a full evaluation run; stream log output via SSE."""
     state: _AppState = app.state.data
     _check_run_preconditions(state, dry_run=False)
-
-    log_level = logging.DEBUG if req.verbose else logging.INFO
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
-
+    state.stop_event.clear()
+    queue: asyncio.Queue = asyncio.Queue()
     task = asyncio.create_task(
-        _run_from_config(
-            config=state.config,  # type: ignore[arg-type]
+        _run_with_progress(  # type: ignore[arg-type]
+            config=state.config,
             queue=queue,
+            stop_event=state.stop_event,
             dry_run=False,
-            log_level=log_level,
         )
     )
     state.run_task = task
-
     return EventSourceResponse(_sse_generator(queue, task))
 
 
 @app.post("/api/dry-run")
 async def dry_run_evaluation(req: RunRequest):
-    """Validate config and dataset without running evaluation; stream via SSE."""
     state: _AppState = app.state.data
     _check_run_preconditions(state, dry_run=True)
-
-    log_level = logging.DEBUG if req.verbose else logging.INFO
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
-
+    state.stop_event.clear()
+    queue: asyncio.Queue = asyncio.Queue()
     task = asyncio.create_task(
-        _run_from_config(
-            config=state.config,  # type: ignore[arg-type]
+        _run_with_progress(  # type: ignore[arg-type]
+            config=state.config,
             queue=queue,
+            stop_event=state.stop_event,
             dry_run=True,
-            log_level=log_level,
         )
     )
     state.run_task = task
-
     return EventSourceResponse(_sse_generator(queue, task))
+
+
+@app.post("/api/stop")
+async def stop_evaluation():
+    """Signal the running evaluation to stop after the current entry finishes."""
+    state: _AppState = app.state.data
+    if state.run_task is None or state.run_task.done():
+        raise HTTPException(status_code=409, detail="No evaluation is currently running.")
+    state.stop_event.set()
+    return {"ok": True}
 
 
 @app.get("/api/status", response_model=StatusResponse)
 async def get_status() -> StatusResponse:
-    """Return current app state for the frontend to check."""
     state: _AppState = app.state.data
     is_running = state.run_task is not None and not state.run_task.done()
     run_id = (
@@ -421,7 +535,6 @@ async def get_status() -> StatusResponse:
 
 
 def main() -> None:
-    """Start the orchestrator API server."""
     import uvicorn
 
     uvicorn.run("orchestrator.api:app", host="127.0.0.1", port=8080, reload=False)
