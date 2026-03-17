@@ -1,8 +1,8 @@
 """FastAPI server for the RAG evaluation orchestrator.
 
 Wraps the existing orchestrator/runner logic to expose a local web API,
-enabling the browser-based frontend to load configs, set env vars, and
-stream structured evaluation progress.
+enabling the browser-based frontend to load configs and stream structured
+evaluation progress. Environment variables are configured via .env / docker-compose.
 
 Usage:
     uvicorn orchestrator.api:app --port 8080
@@ -44,25 +44,6 @@ from orchestrator.tracing import setup_tracing, shutdown_tracing  # noqa: E402
 from shared_types.schemas import RunConfig  # noqa: E402
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Known env keys exposed to the frontend
-# ---------------------------------------------------------------------------
-
-ENV_KEYS: list[str] = [
-    "WORKER_URL",
-    "LOCAL_MODELS_DIR",
-    "LOCAL_DATASETS_DIR",
-    "HF_TOKEN",
-    "LANGFUSE_PUBLIC_KEY",
-    "LANGFUSE_SECRET_KEY",
-    "LANGFUSE_BASE_URL",
-    "LLM_API_KEY",
-    "LLAMA_SERVER_PATH",
-    "EMBEDDING_PORT",
-    "GENERATION_PORT",
-]
-
 
 # ---------------------------------------------------------------------------
 # Application state
@@ -107,18 +88,6 @@ class ConfigLoadResponse(BaseModel):
     config: dict | None = None  # type: ignore[type-arg]
     yaml_text: str = ""
     error: str | None = None
-
-
-class EnvResponse(BaseModel):
-    values: dict[str, str]
-
-
-class EnvUpdateRequest(BaseModel):
-    values: dict[str, str]
-
-
-class EnvUpdateResponse(BaseModel):
-    ok: bool
 
 
 class RunRequest(BaseModel):
@@ -449,22 +418,6 @@ async def load_config(req: ConfigLoadRequest) -> ConfigLoadResponse:
     return ConfigLoadResponse(
         ok=True, config=config.model_dump(mode="json"), yaml_text=yaml_text
     )
-
-
-@app.get("/api/env", response_model=EnvResponse)
-async def get_env() -> EnvResponse:
-    return EnvResponse(values={k: os.environ.get(k, "") for k in ENV_KEYS})
-
-
-@app.post("/api/env", response_model=EnvUpdateResponse)
-async def update_env(req: EnvUpdateRequest) -> EnvUpdateResponse:
-    for k, v in req.values.items():
-        if k in ENV_KEYS:
-            if v:
-                os.environ[k] = v
-            else:
-                os.environ.pop(k, None)
-    return EnvUpdateResponse(ok=True)
 
 
 @app.post("/api/run")

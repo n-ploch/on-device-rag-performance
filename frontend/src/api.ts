@@ -1,4 +1,4 @@
-import type { AppStatus, ConfigLoadResponse, EnvValues, RunEvent } from './types';
+import type { AppStatus, ConfigLoadResponse, RunEvent } from './types';
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -21,15 +21,6 @@ export async function loadConfigFromContent(content: string): Promise<ConfigLoad
   return post('/api/config/load', { content });
 }
 
-export async function getEnv(): Promise<EnvValues> {
-  const res = await fetch('/api/env');
-  const data = await res.json();
-  return data.values as EnvValues;
-}
-
-export async function saveEnv(values: Partial<EnvValues>): Promise<void> {
-  await post('/api/env', { values });
-}
 
 export async function getStatus(): Promise<AppStatus> {
   const res = await fetch('/api/status');

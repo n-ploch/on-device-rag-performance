@@ -182,8 +182,7 @@ function DryRunCard({ result }: { result: DryRunResultEvent }) {
     <div className="dry-run-card">
       <div className="dry-run-title">Dry run validated</div>
       <p>
-        Ready to evaluate <strong>{result.total_entries}</strong> entries across{' '}
-        <strong>{result.total_configs}</strong> config{result.total_configs !== 1 ? 's' : ''}.
+        Ready to evaluate <strong>{result.total_configs}</strong> config{result.total_configs !== 1 ? 's' : ''}.
       </p>
       <div className="dry-run-ids">
         {result.run_ids.map((id) => (
@@ -216,10 +215,6 @@ function StoppedCard({ ev }: { ev: StoppedEvent }) {
           <div className="metric-chip summary-chip">
             <span className="metric-name">Avg MRR</span>
             <span className="metric-value">{fmt(ev.avg_mrr)}</span>
-          </div>
-          <div className="metric-chip summary-chip">
-            <span className="metric-name">Abstentions</span>
-            <span className="metric-value">{ev.abstentions}/{ev.total}</span>
           </div>
         </div>
       )}

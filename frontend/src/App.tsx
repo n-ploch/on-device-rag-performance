@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import './App.css';
 import { getStatus } from './api';
-import { EnvTab } from './components/EnvTab';
 import { RunTab } from './components/RunTab';
 import { SetupTab } from './components/SetupTab';
 import type { AppStatus } from './types';
 
-type Tab = 'setup' | 'env' | 'run';
+type Tab = 'setup' | 'run';
 
 const DEFAULT_STATUS: AppStatus = {
   config_loaded: false,
@@ -16,7 +15,6 @@ const DEFAULT_STATUS: AppStatus = {
 
 const TAB_LABELS: Record<Tab, string> = {
   setup: 'Load Config',
-  env: 'Environment',
   run: 'Run',
 };
 
@@ -38,7 +36,7 @@ export default function App() {
     setStatus((s) => ({ ...s, config_loaded: true }));
   }
 
-  const tabs: Tab[] = ['setup', 'env', 'run'];
+  const tabs: Tab[] = ['setup', 'run'];
 
   return (
     <div className="app">
@@ -73,19 +71,13 @@ export default function App() {
           <SetupTab
             onConfigLoaded={onConfigLoaded}
             configLoaded={status.config_loaded}
-            onNext={() => setTab('env')}
-          />
-        )}
-        {tab === 'env' && (
-          <EnvTab
-            onBack={() => setTab('setup')}
             onNext={() => setTab('run')}
           />
         )}
         {tab === 'run' && (
           <RunTab
             status={status}
-            onBack={() => setTab('env')}
+            onBack={() => setTab('setup')}
           />
         )}
       </main>

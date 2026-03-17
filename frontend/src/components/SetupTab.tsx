@@ -104,7 +104,7 @@ export function SetupTab({ onConfigLoaded, configLoaded, onNext }: Props) {
           className={configLoaded ? 'btn-next btn-next-ready' : 'btn-next'}
           onClick={onNext}
         >
-          Next: Environment →
+          Next: Run →
         </button>
         {!configLoaded && (
           <span className="nav-hint">Load a config file to continue</span>
