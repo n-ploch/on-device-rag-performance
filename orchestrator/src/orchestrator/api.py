@@ -41,7 +41,7 @@ from orchestrator.runner import (  # noqa: E402
     evaluate_single,
     load_ground_truth,
 )
-from orchestrator.tracing import setup_tracing, shutdown_tracing  # noqa: E402
+from orchestrator.tracing import setup_tracing, shutdown_tracing, verify_tracing_connection  # noqa: E402
 from shared_types.schemas import RunConfig  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -352,6 +352,7 @@ async def _run_with_progress(
             validation = orchestrator.validate_dataset()
             entries = load_ground_truth(validation.ground_truth_path)
 
+            await verify_tracing_connection(config.observability)
             tracer = setup_tracing(observability=config.observability)
             try:
                 await _run_configs_loop_with_progress(
