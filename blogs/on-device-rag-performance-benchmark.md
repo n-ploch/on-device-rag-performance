@@ -138,7 +138,7 @@ The trade-off: Mistral-family generation runs roughly 2 seconds slower on averag
 
 Within each model family, returns diminish with increasing precision: moving from Q4 to Q5 to Q8 yields modest quality improvements at equally modest latency cost. **The exception is extreme compression** — IQ1 and Q2 for Llama 3.2, and IQ3 for Mistral 7B produce near-gibberish outputs, collapsing correctness toward zero and hallucination toward 1.0. The quality cliff is sharp, not gradual.
 
-**Apple Silicon works best with Q4/Q8 quantizations**: Mistral 7B at Q4 *outperforms* lower quantization levels on generation latency, probably related to Apple Metal being optimized for Q4 and Q8. Q8 performs nearly as fast as Q5 for both Llama and Ministral, meaning there is very little latency penalty for choosing the highest quality.
+**Apple Silicon works best with Q4/Q8 quantizations**: Mistral 7B at Q4 *outperforms* lower quantization levels on generation latency, probably related to Apple Metal's internal optimization. Q8 performs nearly as fast as Q5 for both Llama and Ministral, meaning there is very little latency penalty for choosing the highest quality.
 
 The IQ quantizations are not only slower, they also drop substantially in quality — using low quantizations on hardware unoptimized for them yields no advantage at all.
 
