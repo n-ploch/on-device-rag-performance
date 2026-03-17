@@ -17,21 +17,6 @@ observability:
   print_logs: true  # Whether to print logs to terminal
 
 run_configs:
-  - run_id: "e5_large_llama_3_2_3B_q1_sample"
-    limit: 5  # optional: evaluate only the first N ground truth entries
-    retrieval:
-      dataset_id: *dataset_id
-      model: "ChristianAzinn/e5-large-v2-gguf"
-      quantization: "q4_k_m"
-      dimensions: 1024
-      chunking:
-        strategy: "fixed"
-        chunk_size: 500
-        chunk_overlap: 64
-      k: 6
-    generation:
-      model: "unsloth/Llama-3.2-3B-Instruct-GGUF"
-      quantization: "ud-iq1_s"
 
   - run_id: "e5_large_test_ministral_3_3B_q4_sample"
     limit: 2  # optional: evaluate only the first N ground truth entries
@@ -49,27 +34,44 @@ run_configs:
       model: "mistralai/Ministral-3-3B-Instruct-2512-GGUF"
       quantization: "q4_k_m"
 
-  - run_id: "e5_large_mistral_large_latest_sample"
-    limit: 3 
-    retrieval:
-      dataset_id: *dataset_id
-      model: "ChristianAzinn/e5-large-v2-gguf"
-      quantization: "q4_k_m"
-      dimensions: 1024
-      chunking:
-        strategy: "fixed"
-        chunk_size: 500
-        chunk_overlap: 64
-      k: 6
-    generation:
-      model: "mistral-large-latest"
-      hosting: "remote"
-      remote:
-        base_url: "https://api.mistral.ai/v1"
-        api_key_env: "LLM_API_KEY" 
-        extra_headers:
-          Content-Type: "application/json"
-        rate_limit_rps: 1.0  
+  # - run_id: "e5_large_llama_3_2_3B_q1_sample"
+  #   limit: 5  # optional: evaluate only the first N ground truth entries
+  #   retrieval:
+  #     dataset_id: *dataset_id
+  #     model: "ChristianAzinn/e5-large-v2-gguf"
+  #     quantization: "q4_k_m"
+  #     dimensions: 1024
+  #     chunking:
+  #       strategy: "fixed"
+  #       chunk_size: 500
+  #       chunk_overlap: 64
+  #     k: 6
+  #   generation:
+  #     model: "unsloth/Llama-3.2-3B-Instruct-GGUF"
+  #     quantization: "ud-iq1_s"
+
+
+  # - run_id: "e5_large_mistral_large_latest_sample"
+  #   limit: 3 
+  #   retrieval:
+  #     dataset_id: *dataset_id
+  #     model: "ChristianAzinn/e5-large-v2-gguf"
+  #     quantization: "q4_k_m"
+  #     dimensions: 1024
+  #     chunking:
+  #       strategy: "fixed"
+  #       chunk_size: 500
+  #       chunk_overlap: 64
+  #     k: 6
+  #   generation:
+  #     model: "mistral-large-latest"
+  #     hosting: "remote"
+  #     remote:
+  #       base_url: "https://api.mistral.ai/v1"
+  #       api_key_env: "LLM_API_KEY" 
+  #       extra_headers:
+  #         Content-Type: "application/json"
+  #       rate_limit_rps: 1.0  
 
 # for mistral models: https://huggingface.co/lmstudio-community/Mistral-7B-Instruct-v0.3-GGUF
 # for ministral models: https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-GGUF
