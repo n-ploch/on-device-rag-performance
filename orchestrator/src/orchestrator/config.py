@@ -50,9 +50,8 @@ class OTLPBackendConfig(BaseModel):
 class ObservabilityConfig(BaseModel):
     """Observability and tracing configuration."""
 
-    langfuse: bool = False  # Legacy single-backend flag; ignored when backends is non-empty
-    backends: list[OTLPBackendConfig] = []  # Multi-backend list; takes precedence when non-empty
-    output_jsonl: str = "./logs/traces.jsonl"
+    backends: list[OTLPBackendConfig] = []
+    output_jsonl: str | None = None
     sys_logs_path: str | None = None  # Path to write Python logs (None = no file)
     print_logs: bool = True  # Whether to print logs to terminal
 

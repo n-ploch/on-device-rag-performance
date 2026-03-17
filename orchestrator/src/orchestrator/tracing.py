@@ -110,10 +110,8 @@ async def verify_tracing_connection(observability: "ObservabilityConfig | None")
 
     if observability is not None and observability.backends:
         active_backends = [b for b in observability.backends if b.enabled]
-    elif observability is None or observability.langfuse:
-        active_backends = [OTLPBackendConfig(type="langfuse")]
     else:
-        return  # tracing disabled — nothing to check
+        return  # no backends configured — nothing to check
 
     for backend in active_backends:
         url, headers = _endpoint_and_headers(backend.type)
@@ -151,8 +149,7 @@ def setup_tracing(
 
     Backend selection:
       - When observability.backends is non-empty, those backends are used.
-      - When observability.langfuse is True (legacy flag), a Langfuse backend is used.
-      - When observability is None, falls back to the Langfuse legacy path.
+      - Otherwise no OTLP backends are registered (spans are not exported remotely).
 
     Args:
         service_name: Service name for resource identification.
@@ -166,8 +163,6 @@ def setup_tracing(
     # Determine active backend list
     if observability is not None and observability.backends:
         active_backends = [b for b in observability.backends if b.enabled]
-    elif observability is None or observability.langfuse:
-        active_backends = [OTLPBackendConfig(type="langfuse")]
     else:
         active_backends = []
 

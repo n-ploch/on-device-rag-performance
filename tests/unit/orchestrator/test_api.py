@@ -37,7 +37,9 @@ dataset:
   id: scifact
   name: scifact
 observability:
-  langfuse: true
+  backends:
+    - type: "langfuse"
+      enabled: true
 run_configs:
   - run_id: test_run
     retrieval:
@@ -288,8 +290,8 @@ class TestRunPreconditions:
         assert "already running" in r.json()["detail"].lower()
         loop.close()
 
-    def test_run_with_langfuse_missing_keys(self, client, monkeypatch):
-        """422 when langfuse is enabled but credentials are absent."""
+    def test_run_with_missing_backend_credentials(self, client, monkeypatch):
+        """422 when a backend is enabled but credentials are absent."""
         monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
         monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
         client.post("/api/config/load", json={"content": LANGFUSE_YAML})
