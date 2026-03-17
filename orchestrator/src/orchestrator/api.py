@@ -46,6 +46,40 @@ from shared_types.schemas import RunConfig  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# SSE event helpers
+# ---------------------------------------------------------------------------
+
+# The queue carries JSON strings; None is the sentinel that signals completion.
+_Queue = asyncio.Queue  # type: ignore[type-arg]
+
+
+async def _emit(queue: _Queue, event: dict) -> None:  # type: ignore[type-arg]
+    await queue.put(json.dumps(event))
+
+
+async def _sse_generator(queue: _Queue, task: asyncio.Task):  # type: ignore[type-arg]
+    """Forward structured JSON events from the queue as SSE data frames."""
+    while True:
+        try:
+            msg = await asyncio.wait_for(queue.get(), timeout=1.0)
+            if msg is None:
+                # Sentinel: evaluation task exited cleanly
+                break
+            yield {"data": msg}
+        except asyncio.TimeoutError:
+            if task.done():
+                exc = task.exception()
+                if exc:
+                    yield {"data": json.dumps({"type": "error", "message": str(exc)})}
+                break
+            yield {"comment": "keep-alive"}
+
+    yield {"data": json.dumps({"type": "done"})}
+
+
+
 # ---------------------------------------------------------------------------
 # Application state
 # ---------------------------------------------------------------------------
