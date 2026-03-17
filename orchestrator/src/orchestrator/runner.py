@@ -164,6 +164,8 @@ async def evaluate_single(
         attributes={
             "run_id": run_config.run_id,
             "langfuse.session.id": session_id,
+            "session.id": session_id,
+            "wandb.thread_id": session_id,
             "claim_id": entry.id,
             "gen_ai.prompt": entry.input,
             "ground_truth": entry.expected_response or "",
@@ -443,7 +445,7 @@ async def _run(
         logger.info("Loaded %d ground truth entries", len(entries))
 
         # Set up active tracing (spans exported via BatchSpanProcessor)
-        tracer = setup_tracing()
+        tracer = setup_tracing(observability=config.observability)
 
         try:
             await _run_configs_loop(

@@ -333,6 +333,11 @@ def create_app() -> FastAPI:
                 generation_span.set_attribute("langfuse.observation.usage.input", gen_result.prompt_tokens)
                 generation_span.set_attribute("langfuse.observation.usage.output", gen_result.completion_tokens)
 
+                # Standard OTel GenAI semantic conventions (dual-write for cross-platform compat)
+                generation_span.set_attribute("gen_ai.operation.name", "chat")
+                generation_span.set_attribute("gen_ai.usage.input_tokens", gen_result.prompt_tokens)
+                generation_span.set_attribute("gen_ai.usage.output_tokens", gen_result.completion_tokens)
+
         e2e_latency_ms = (time.perf_counter() - e2e_start) * 1000
 
         retrieval_data = RetrievalData(

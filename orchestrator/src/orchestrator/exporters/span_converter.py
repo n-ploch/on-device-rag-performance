@@ -125,6 +125,8 @@ def result_to_spans(
     root_attrs: dict[str, Any] = {
         "run_id": run_id,
         "langfuse.session.id": run_id,
+        "session.id": run_id,
+        "wandb.thread_id": run_id,
         "claim_id": claim_id,
         "gen_ai.prompt": ground_truth.input,
         "gen_ai.completion": response.output,
@@ -197,6 +199,10 @@ def result_to_spans(
         "langfuse.observation.type": "generation",
         "langfuse.observation.usage.input": inf.prompt_tokens,
         "langfuse.observation.usage.output": inf.completion_tokens,
+        # Standard OTel GenAI semantic conventions (dual-write for cross-platform compat)
+        "gen_ai.operation.name": "chat",
+        "gen_ai.usage.input_tokens": inf.prompt_tokens,
+        "gen_ai.usage.output_tokens": inf.completion_tokens,
     }
 
     if ground_truth.expected_label is not None:
