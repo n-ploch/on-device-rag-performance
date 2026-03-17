@@ -1,6 +1,6 @@
 # On-Device RAG Performance: A Quantization & Architecture Benchmark
 
-Running a RAG pipeline on-device means every model choice carries a dual cost: answer quality *and* system load. This analysis focuses on small Mistral-family models — Ministral 3 (3B and 8B parameters) and Mistral 7B v0.3 — evaluated across quantization levels from Q1 to Q8, with the goal of mapping accurate quality–cost tradeoffs for context-grounded answer generation. Llama 3.2 3B serves as a widely-used small-model alternative for direct comparison, and Mistral Large via API provides the quality ceiling: what a capable, unconstrained model would score on the same questions.
+Running a RAG pipeline on-device means every model choice carries a dual cost: answer quality at what system performance and load. This analysis focuses on small Mistral-family models — Ministral 3 (3B and 8B parameters) and Mistral 7B v0.3 — evaluated across quantization levels from Q3 to Q8, with the goal of mapping accurate quality–cost tradeoffs for context-grounded answer generation. Llama 3.2 3B serves as a widely-used small-model alternative for direct comparison, and Mistral Large via API provides the quality ceiling: what a capable, unconstrained model would score on the same questions.
 
 The experiment holds retrieval constant — all configurations share the same `e5-large` retriever and ChromaDB collection — so that differences in answer correctness, faithfulness, and hallucination can be attributed squarely to the generator. Alongside these RAG-specific quality metrics, every inference is instrumented with latency, throughput, and hardware utilisation measurements, enabling direct reasoning about which configurations deliver good answers at acceptable system cost.
 
@@ -10,8 +10,8 @@ The experiment holds retrieval constant — all configurations share the same `e
 
 All results in this post were collected using **[RAGrig](https://github.com/n-ploch/RAGrig)**, an open-source orchestration tool that instruments a full RAG pipeline with [OpenTelemetry](https://opentelemetry.io/) (OTEL) spans, making retrieval and generation fully traceable and exportable to any OTEL-compatible backend. The tool follows an **Orchestrator + Worker** architecture:
 
-- The **Orchestrator** drives the evaluation loop and ships OTEL spans to any external tracing backend (a self-hosted [Langfuse](https://langfuse.com/) instance was used for these experiments)
-- The **Worker** runs quantized GGUF models via `llama.cpp` servers on any hardware — Apple Silicon, NVIDIA GPUs, or CPU-only edge devices — making the benchmark reproducible across platforms
+- The **Orchestrator** drives the evaluation loop and optionally ships OTEL spans to an external tracing backend (a self-hosted [Langfuse](https://langfuse.com/) instance was used for these experiments)
+- The **Worker** runs quantized GGUF models via `llama.cpp` servers on any hardware type.
 
 ---
 
@@ -24,7 +24,7 @@ The benchmark uses a standard two-stage RAG pipeline with a fixed retrieval mode
 - **Dataset:** eManuals subset from [RAGBench](https://huggingface.co/datasets/rungalileo/ragbench) — 61 questions drawn from consumer electronics manuals, each with ground-truth answers and annotated relevant context chunks
 - **Retrieval model:** `intfloat/multilingual-e5-large` (1024-dim embeddings, Q4 quantized), returning top-6 chunks via cosine similarity from a local ChromaDB collection
 - **Generator prompt:** The system prompt instructs the model to answer from the provided context chunks; completion capped at 256 tokens
-- **Evaluator:** Qwen3-235B scores each answer on three dimensions as judge
+- **Evaluator (external):** Qwen3-235B scores each answer on three dimensions as judge. The LLM judges were implemented in Langfuse
 
 ### Generator Models Tested
 
@@ -118,7 +118,7 @@ The table below summarises all 16 configurations. Three patterns stand out immed
 
 Before comparing models, it's worth anchoring on the retrieval distribution. Because all generator models share the same fixed retrieval model (`e5-large`, Q4), they see identical retrieved context for each claim. The recall@6 distribution below sets the stage: when recall falls below ~0.4, the retrieved chunks are unlikely to contain the ground-truth answer, placing any generator in a difficult position. This threshold is used later in the low-recall robustness analysis.
 
-The retrieval latency plot confirms that the retrieval step is a minor contributor to total E2E latency, enabling direct comparison across models.
+The retrieval latency plot confirms that the retrieval step is a minor contributor to total E2E latency with low variance as compared to generation latency, thus it can be neglected in later comparison.
 
 ![Retrieval recall distribution and latency](https://raw.githubusercontent.com/n-ploch/RAGrig/main/blogs/assets/retrieval_recall_distribution.png)
 
@@ -128,7 +128,7 @@ The retrieval latency plot confirms that the retrieval step is a minor contribut
 
 Across most quantization levels, Ministral and Mistral models deliver meaningfully better correctness than Llama 3.2 3B, with additional improvements in hallucination and faithfulness.
 
-The trade-off: Mistral-family generation runs roughly 2 seconds slower on average, though TTFT is comparable at ~1 second. At Q4, Ministral achieves ~51 tokens/sec vs ~48 for Llama; at Q5, ~42 vs ~38. **Llama, however, consumes 300–400 MB more RAM at equivalent quantization**, suggesting less efficient memory access patterns.
+The trade-off: Mistral-family generation runs roughly 2 seconds slower on average, though TTFT is comparable at ~1 second. At Q4, Llama achieves ~51 tokens/sec vs ~48 for Ministral; at Q5, ~42 vs ~38. **Llama, however, consumes 300–400 MB more RAM at equivalent quantization**, suggesting less efficient memory access.
 
 ![Quality metrics and latency across all configurations](https://raw.githubusercontent.com/n-ploch/RAGrig/main/blogs/assets/quality_metrics_all_models.png)
 
@@ -140,7 +140,7 @@ The trade-off: Mistral-family generation runs roughly 2 seconds slower on averag
 
 Within each model family, returns diminish with increasing precision: moving from Q4 to Q5 to Q8 yields modest quality improvements at equally modest latency cost. **The dramatic exception is extreme compression** — IQ1 and Q2 for Llama 3.2, and IQ3 for Mistral 7B produce near-gibberish outputs, collapsing correctness toward zero and hallucination toward 1.0. The quality cliff is sharp, not gradual.
 
-Expectedly, **Apple Silicon works best with Q4/Q8 quantizations**: Mistral 7B at Q4 *outperforms* lower quantization levels on generation latency, explained by MPS hardware acceleration that is better aligned with 4-bit and 8-bit weight formats. Q8 performs nearly as fast as Q5 for both Llama and Ministral, meaning there is very little latency penalty for choosing the highest quality.
+**Apple Silicon works best with Q4/Q8 quantizations**: Mistral 7B at Q4 *outperforms* lower quantization levels on generation latency, explained by MPS hardware acceleration that is better aligned with 4-bit and 8-bit weight formats. Q8 performs nearly as fast as Q5 for both Llama and Ministral, meaning there is very little latency penalty for choosing the highest quality.
 
 The IQ quantizations are not only slower, they also drop substantially in quality — using low quantizations on hardware unoptimized for them yields no advantage at all.
 
@@ -196,13 +196,13 @@ Two configurations with nearly identical RAM footprints (~8.5 GB) arrive at very
 - **Ministral 3B Q8** achieves similar correctness and much higher token throughput, with a lower TTFT (~1.2 s vs ~3.3 s) while generating more tokens per answer.
 - **Mistral 7B Q3_L** scores better on faithfulness (0.89 vs 0.83) and hallucination (0.13 vs 0.21) on average, but at the cost of significantly higher p90 latency (14,118 ms vs 8,091 ms E2E).
 
-**The choice depends on the use case:** if you need fast throughput, Ministral 3B Q8 is the stronger pick. If source fidelity and reduced hallucination are the priority — e.g. in citation-sensitive applications — Mistral 7B Q3_L delivers.
+**The choice depends on the use case:** if you need fast throughput, Ministral 3B Q8 is the stronger pick. If source fidelity and reduced hallucination are the priority, e.g. in citation-sensitive applications, Mistral 7B Q3_L delivers.
 
 ---
 
 ## When Retrieval Fails: Model Robustness Across Recall Regimes
 
-Comparing low-recall (recall@6 < 0.4) and high-recall (recall@6 ≥ 0.8) claims side by side reveals how much of each model's quality is *retrieval-dependent* versus *inherent*. When context is good, most models score reasonably well. When context is poor, differences compound: faithfulness and hallucination degrade for all models, but larger and better-trained models hold up more gracefully.
+Comparing low-recall (recall@6 < 0.4) and high-recall (recall@6 ≥ 0.8) claims side by side reveals how much of each model's quality is *retrieval-dependent* versus *inherent*. When context is good, most models score reasonably well. When context is poor, differences compound: faithfulness and hallucination degrade for all models, but larger models hold up more gracefully.
 
 ![Quality metrics by recall regime](https://raw.githubusercontent.com/n-ploch/RAGrig/main/blogs/assets/quality_recall_regime.png)
 
@@ -255,6 +255,8 @@ Comparing low-recall (recall@6 < 0.4) and high-recall (recall@6 ≥ 0.8) claims 
 | Avoid for RAG on Apple Silicon | Llama 3.2 (any quant), IQ/extreme quantizations |
 
 For on-device RAG where both answer quality and system load matter, **Mistral 7B Q4 on MPS provides the best quality per RAM-byte and the best generation latency with the highest adherence to context.** Ministral 3B Q8, being close in quality to its larger sibling, is the right pick when throughput and correctness are the priority and the 7B latencies are unacceptable. Both are above Llama 3.2 in RAG quality at comparable or lower system cost, especially when retrieval fails.
+
+### Limitations
 
 ### Open Questions
 
