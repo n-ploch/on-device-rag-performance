@@ -1,0 +1,45 @@
+services:
+
+  # ── Orchestrator API ────────────────────────────────────────────────────────
+  orchestrator-api:
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
+    # Override the default CLI command to start the FastAPI server instead
+    command: ["uvicorn", "orchestrator.api:app", "--host", "0.0.0.0", "--port", "8080"]
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount local datasets/models/logs so they persist outside the container
+      - ./local:/app/local
+      - ./logs:/app/logs
+      - ./config:/app/config
+    env_file:
+      - .env
+    environment:
+      # ── Worker ──────────────────────────────────────────────────────────────
+      # Points at the worker container when running together; override for remote workers
+      WORKER_URL: http://host.docker.internal:8000
+
+      # ── Local paths (relative to the /app/local volume mount) ───────────────
+      LOCAL_MODELS_DIR: /app/local/models
+      LOCAL_DATASETS_DIR: /app/local/datasets
+
+      # ── Langfuse tracing ────────────────────────────────────────────────────
+      LANGFUSE_BASE_URL: https://host.docker.internal:3000
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+
+      # ── Secrets (no defaults — must be set in .env or host environment) ─────
+      HF_TOKEN: ${HF_TOKEN:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+
+  # ── Frontend ────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3003:80"
+    depends_on:
+      - orchestrator-api
