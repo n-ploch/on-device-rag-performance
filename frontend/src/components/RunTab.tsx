@@ -93,7 +93,7 @@ function RunHeader({ info }: { info: RunStartEvent }) {
           </span>
         </span>
         <span className="meta-item">
-          <span className="meta-label">Langfuse Session ID</span>
+          <span className="meta-label">Session ID</span>
           <span className="meta-value mono">{info.session_id}</span>
         </span>
       </div>

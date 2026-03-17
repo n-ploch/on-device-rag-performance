@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -32,10 +33,25 @@ class DatasetConfig(BaseModel):
     limits: DatasetLimits = Field(default_factory=DatasetLimits)
 
 
+class OTLPBackendConfig(BaseModel):
+    """Configuration for a single OTEL export backend.
+
+    Credentials are always read from environment variables at runtime.
+    Supported types and their required env vars:
+      langfuse: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL
+      weave:    WANDB_API_KEY, WANDB_BASE_URL (+ optional WANDB_ENTITY, WANDB_PROJECT)
+      generic:  OTEL_EXPORTER_OTLP_ENDPOINT (+ optional OTEL_EXPORTER_OTLP_HEADERS)
+    """
+
+    type: Literal["langfuse", "weave", "generic"]
+    enabled: bool = True
+
+
 class ObservabilityConfig(BaseModel):
     """Observability and tracing configuration."""
 
-    langfuse: bool = False
+    langfuse: bool = False  # Legacy single-backend flag; ignored when backends is non-empty
+    backends: list[OTLPBackendConfig] = []  # Multi-backend list; takes precedence when non-empty
     output_jsonl: str = "./logs/traces.jsonl"
     sys_logs_path: str | None = None  # Path to write Python logs (None = no file)
     print_logs: bool = True  # Whether to print logs to terminal

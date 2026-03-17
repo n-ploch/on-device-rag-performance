@@ -41,7 +41,7 @@ from orchestrator.runner import (  # noqa: E402
     evaluate_single,
     load_ground_truth,
 )
-from orchestrator.tracing import setup_tracing, shutdown_tracing  # noqa: E402
+from orchestrator.tracing import setup_tracing, shutdown_tracing, verify_tracing_connection  # noqa: E402
 from shared_types.schemas import RunConfig  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -352,7 +352,8 @@ async def _run_with_progress(
             validation = orchestrator.validate_dataset()
             entries = load_ground_truth(validation.ground_truth_path)
 
-            tracer = setup_tracing()
+            await verify_tracing_connection(config.observability)
+            tracer = setup_tracing(observability=config.observability)
             try:
                 await _run_configs_loop_with_progress(
                     run_configs=run_configs,
@@ -385,10 +386,38 @@ def _check_run_preconditions(state: _AppState, dry_run: bool = False) -> None:
         )
     if state.run_task is not None and not state.run_task.done():
         raise HTTPException(status_code=409, detail="An evaluation is already running.")
-    if not dry_run and state.config.observability.langfuse:
+    if dry_run:
+        return
+
+    obs = state.config.observability
+
+    _BACKEND_REQUIRED_VARS: dict[str, list[str]] = {
+        "langfuse": ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_BASE_URL"],
+        "weave": ["WANDB_API_KEY", "WANDB_BASE_URL"],
+        "generic": ["OTEL_EXPORTER_OTLP_ENDPOINT"],
+    }
+
+    if obs.backends:
+        # Multi-backend path: validate each enabled backend
+        for backend in obs.backends:
+            if not backend.enabled:
+                continue
+            required = _BACKEND_REQUIRED_VARS.get(backend.type, [])
+            missing = [k for k in required if not os.environ.get(k)]
+            if missing:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Backend '{backend.type}' is enabled but "
+                        f"{' and '.join(missing)} are not set. "
+                        "Configure them in the Environment tab."
+                    ),
+                )
+    elif obs.langfuse:
+        # Legacy single-backend path
         missing = [
             k
-            for k in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
+            for k in _BACKEND_REQUIRED_VARS["langfuse"]
             if not os.environ.get(k)
         ]
         if missing:
@@ -437,6 +466,14 @@ async def load_config(req: ConfigLoadRequest) -> ConfigLoadResponse:
     return ConfigLoadResponse(
         ok=True, config=config.model_dump(mode="json"), yaml_text=yaml_text
     )
+
+
+@app.post("/api/config/reset")
+async def reset_config():
+    state: _AppState = app.state.data
+    state.config = None
+    state.config_yaml_text = ""
+    return {"ok": True}
 
 
 @app.get("/api/worker/url", response_model=WorkerUrlResponse)

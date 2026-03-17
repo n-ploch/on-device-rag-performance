@@ -43,6 +43,10 @@ export async function getStatus(): Promise<AppStatus> {
   return res.json();
 }
 
+export async function resetConfig(): Promise<void> {
+  await post('/api/config/reset', {});
+}
+
 export async function stopRun(): Promise<void> {
   await post('/api/stop', {});
 }
