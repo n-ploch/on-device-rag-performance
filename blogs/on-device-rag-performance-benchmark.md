@@ -1,6 +1,6 @@
 # On-Device RAG Performance: A Quantization & Architecture Benchmark
 
-Running a RAG pipeline on-device means every model choice carries a dual cost: answer quality at what system performance and load. This analysis focuses on small Mistral-family models — Ministral 3 (3B and 8B parameters) and Mistral 7B v0.3 — evaluated across quantization levels from Q3 to Q8, with the goal of mapping accurate quality–cost tradeoffs for context-grounded answer generation. Llama 3.2 3B serves as a widely-used small-model alternative for direct comparison, and Mistral Large via API provides the quality ceiling: what a capable, unconstrained model would score on the same questions.
+Running a RAG pipeline on-device means every model choice influences answer quality, system performance, and load. This analysis focuses on small Mistral-family models — Ministral 3 (3B and 8B parameters) and Mistral 7B v0.3 — evaluated across quantization levels from Q3 to Q8, with the goal of mapping accurate quality–cost tradeoffs for context-grounded answer generation. Llama 3.2 3B serves as a widely-used small-model alternative for direct comparison, and Mistral Large via API provides the quality ceiling: what a capable, unconstrained model would score on the same questions.
 
 The experiment holds retrieval constant — all configurations share the same `e5-large` retriever and ChromaDB collection — so that differences in answer correctness, faithfulness, and hallucination can be attributed squarely to the generator. Alongside these RAG-specific quality metrics, every inference is instrumented with latency, throughput, and hardware utilisation measurements, enabling direct reasoning about which configurations deliver good answers at acceptable system cost.
 
@@ -247,16 +247,15 @@ Comparing low-recall (recall@6 < 0.4) and high-recall (recall@6 ≥ 0.8) claims 
 
 ### Verdict
 
-| Use Case | Recommended Config |
-|---|---|
-| Best quality per RAM-byte, context adherence priority | **Mistral 7B Q4** |
-| Throughput and correctness priority, 7B latency unacceptable | **Ministral 3B Q8** |
-| Maximum quality, no compute constraints | **Mistral Large API** |
-| Avoid for RAG on Apple Silicon | Llama 3.2 (any quant), IQ/extreme quantizations |
+For on-device RAG where both answer quality and system load matter, **Mistral 7B Q4 on MPS provides the best quality per RAM-byte and the best generation latency with the highest adherence to context.** Ministral 3B Q8, being close in quality to its larger sibling, is the right pick when throughput is the priority and the 7B latencies are unacceptable. Both are above Llama 3.2 in RAG quality at comparable or lower system cost, especially when retrieval fails.
 
-For on-device RAG where both answer quality and system load matter, **Mistral 7B Q4 on MPS provides the best quality per RAM-byte and the best generation latency with the highest adherence to context.** Ministral 3B Q8, being close in quality to its larger sibling, is the right pick when throughput and correctness are the priority and the 7B latencies are unacceptable. Both are above Llama 3.2 in RAG quality at comparable or lower system cost, especially when retrieval fails.
+### RAGrig
+
+This benchmark marks the first field test of RAGrig as versatile evaluation harness. The Orchestrator + Worker architecture made it straightforward to run repeated configurations on edge hardware, while OTEL instrumentation ensured standardized trace capture. The pipeline is deliberately modular: swapping in a different retriever, adding a re-ranker, or extending to agentic retrieval requires only changes to the pipeline itself; the tracing and repeatability guarantees around it remain intact, backed by llama.cpp's portability and OTEL's ecosystem reach.
 
 ### Limitations
+
+Though trends are clearly identifiable, the variance driven partly by LLM-judges and by run-to-run model variance results in wide error bars. More experimental repetitions would tighten confidence intervals, though some of that variance may be intrinsic to stochastic generation at temperature 0.7 and unlikely to disappear entirely. Hardware constraints also cap the scope of the study: 16 GB unified memory limits testable models, making 10B+ parameter models inaccessible.
 
 ### Open Questions
 
