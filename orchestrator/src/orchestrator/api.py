@@ -468,6 +468,14 @@ async def load_config(req: ConfigLoadRequest) -> ConfigLoadResponse:
     )
 
 
+@app.post("/api/config/reset")
+async def reset_config():
+    state: _AppState = app.state.data
+    state.config = None
+    state.config_yaml_text = ""
+    return {"ok": True}
+
+
 @app.get("/api/worker/url", response_model=WorkerUrlResponse)
 async def get_worker_url() -> WorkerUrlResponse:
     return WorkerUrlResponse(url=os.environ.get("WORKER_URL", "http://localhost:8000"))

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import './App.css';
-import { getStatus } from './api';
+import { getStatus, resetConfig } from './api';
 import { RunTab } from './components/RunTab';
 import { SetupTab } from './components/SetupTab';
 import type { AppStatus } from './types';
@@ -23,6 +23,7 @@ export default function App() {
   const [status, setStatus] = useState<AppStatus>(DEFAULT_STATUS);
 
   useEffect(() => {
+    resetConfig().catch(() => {});
     const refresh = () =>
       getStatus()
         .then(setStatus)
@@ -67,19 +68,19 @@ export default function App() {
       </nav>
 
       <main className="tab-panel">
-        {tab === 'setup' && (
+        <div style={{ display: tab === 'setup' ? undefined : 'none' }}>
           <SetupTab
             onConfigLoaded={onConfigLoaded}
             configLoaded={status.config_loaded}
             onNext={() => setTab('run')}
           />
-        )}
-        {tab === 'run' && (
+        </div>
+        <div style={{ display: tab === 'run' ? undefined : 'none' }}>
           <RunTab
             status={status}
             onBack={() => setTab('setup')}
           />
-        )}
+        </div>
       </main>
     </div>
   );
