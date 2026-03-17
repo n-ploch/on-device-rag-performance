@@ -10,7 +10,7 @@ The experiment holds retrieval constant — all configurations share the same `e
 
 All results in this post were collected using **[RAGrig](https://github.com/n-ploch/RAGrig)**, an open-source orchestration tool that instruments a full RAG pipeline with [OpenTelemetry](https://opentelemetry.io/) (OTEL) spans, making retrieval and generation fully traceable and exportable to any OTEL-compatible backend. The tool follows an **Orchestrator + Worker** architecture:
 
-- The **Orchestrator** drives the evaluation loop and optionally ships OTEL spans to an external tracing backend (a self-hosted [Langfuse](https://langfuse.com/) instance was used for these experiments)
+- The **Orchestrator** drives the evaluation loop and optionally ships OTEL spans to an external tracing backend (a self-hosted [Langfuse](https://langfuse.com/) instance was used for tracing experiments and LLM-based evaluation)
 - The **Worker** runs quantized GGUF models via `llama.cpp` servers on any hardware type.
 
 ---
@@ -124,7 +124,7 @@ The retrieval latency plot confirms that the retrieval step is a minor contribut
 
 ---
 
-## Mistral Family Clearly Outperforms Llama 3.2
+## Mistral Family Outperforms Llama 3.2
 
 Across most quantization levels, Ministral and Mistral models deliver meaningfully better correctness than Llama 3.2 3B, with additional improvements in hallucination and faithfulness.
 
