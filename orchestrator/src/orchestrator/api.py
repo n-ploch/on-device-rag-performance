@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 import yaml
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -87,6 +88,22 @@ class ConfigLoadResponse(BaseModel):
     ok: bool
     config: dict | None = None  # type: ignore[type-arg]
     yaml_text: str = ""
+    error: str | None = None
+
+
+class WorkerUrlResponse(BaseModel):
+    url: str
+
+
+class WorkerUrlUpdateRequest(BaseModel):
+    url: str
+
+
+class WorkerCheckResponse(BaseModel):
+    ok: bool
+    status: str | None = None
+    backend: str | None = None
+    models_loaded: bool | None = None
     error: str | None = None
 
 
@@ -418,6 +435,43 @@ async def load_config(req: ConfigLoadRequest) -> ConfigLoadResponse:
     return ConfigLoadResponse(
         ok=True, config=config.model_dump(mode="json"), yaml_text=yaml_text
     )
+
+
+@app.get("/api/worker/url", response_model=WorkerUrlResponse)
+async def get_worker_url() -> WorkerUrlResponse:
+    return WorkerUrlResponse(url=os.environ.get("WORKER_URL", "http://localhost:8000"))
+
+
+@app.post("/api/worker/url", response_model=WorkerUrlResponse)
+async def set_worker_url(req: WorkerUrlUpdateRequest) -> WorkerUrlResponse:
+    os.environ["WORKER_URL"] = req.url.rstrip("/")
+    return WorkerUrlResponse(url=os.environ["WORKER_URL"])
+
+
+@app.get("/api/worker/check", response_model=WorkerCheckResponse)
+async def check_worker() -> WorkerCheckResponse:
+    url = os.environ.get("WORKER_URL", "http://localhost:8000")
+    try:
+        async with httpx.AsyncClient(
+            base_url=url, timeout=httpx.Timeout(5.0, connect=3.0)
+        ) as client:
+            response = await client.get("/health")
+            response.raise_for_status()
+            data = response.json()
+            return WorkerCheckResponse(
+                ok=True,
+                status=data.get("status"),
+                backend=data.get("backend"),
+                models_loaded=data.get("models_loaded"),
+            )
+    except httpx.ConnectError:
+        return WorkerCheckResponse(ok=False, error=f"Could not connect to worker at {url}")
+    except httpx.TimeoutException:
+        return WorkerCheckResponse(ok=False, error=f"Connection to worker at {url} timed out")
+    except httpx.HTTPStatusError as exc:
+        return WorkerCheckResponse(ok=False, error=f"Worker returned HTTP {exc.response.status_code}")
+    except Exception as exc:  # noqa: BLE001
+        return WorkerCheckResponse(ok=False, error=str(exc))
 
 
 @app.post("/api/run")

@@ -1,4 +1,4 @@
-import type { AppStatus, ConfigLoadResponse, RunEvent } from './types';
+import type { AppStatus, ConfigLoadResponse, RunEvent, WorkerCheckResponse } from './types';
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
@@ -21,6 +21,22 @@ export async function loadConfigFromContent(content: string): Promise<ConfigLoad
   return post('/api/config/load', { content });
 }
 
+
+export async function getWorkerUrl(): Promise<string> {
+  const res = await fetch('/api/worker/url');
+  const data = await res.json();
+  return data.url as string;
+}
+
+export async function setWorkerUrl(url: string): Promise<string> {
+  const data = await post<{ url: string }>('/api/worker/url', { url });
+  return data.url;
+}
+
+export async function checkWorker(): Promise<WorkerCheckResponse> {
+  const res = await fetch('/api/worker/check');
+  return res.json();
+}
 
 export async function getStatus(): Promise<AppStatus> {
   const res = await fetch('/api/status');

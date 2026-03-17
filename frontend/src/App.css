@@ -141,6 +141,85 @@ body {
 
 .divider { color: #475569; font-size: 0.85rem; }
 
+/* ── Setup sections (a / b) ───────────────────────────────── */
+.setup-section-heading {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setup-section-letter { color: #475569; font-weight: 400; }
+
+.section-status-ok { color: #4ade80; font-size: 0.9rem; }
+
+.section-divider {
+  border: none;
+  border-top: 1px solid #1e293b;
+  margin: 24px 0;
+}
+
+/* ── Worker check ─────────────────────────────────────────── */
+.worker-check-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.worker-url-label {
+  font-size: 0.78rem;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.worker-url-input {
+  flex: 1;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 5px;
+  padding: 4px 8px;
+  min-width: 0;
+}
+.worker-url-input:focus { border-color: #60a5fa; outline: none; }
+
+.btn-check {
+  padding: 5px 14px !important;
+  font-size: 0.82rem !important;
+  white-space: nowrap;
+}
+
+.worker-check-ok,
+.worker-check-err {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 0.83rem;
+  padding: 7px 10px;
+  border-radius: 6px;
+}
+
+.worker-check-ok {
+  background: #052e16;
+  color: #4ade80;
+  border: 1px solid #166534;
+}
+
+.worker-check-err {
+  background: #2d0a0a;
+  color: #f87171;
+  border: 1px solid #7f1d1d;
+}
+
+.check-icon { font-weight: 700; }
+.meta-dim { color: #64748b; }
+
 .yaml-display { margin-top: 16px; }
 .yaml-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .loaded-badge { color: #4ade80; font-size: 0.82rem; font-weight: 500; }

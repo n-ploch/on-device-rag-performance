@@ -1,4 +1,12 @@
 
+export interface WorkerCheckResponse {
+  ok: boolean;
+  status: string | null;
+  backend: string | null;
+  models_loaded: boolean | null;
+  error: string | null;
+}
+
 export interface AppStatus {
   config_loaded: boolean;
   run_id: string | null;

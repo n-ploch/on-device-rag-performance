@@ -14,7 +14,7 @@ const DEFAULT_STATUS: AppStatus = {
 };
 
 const TAB_LABELS: Record<Tab, string> = {
-  setup: 'Load Config',
+  setup: 'Setup',
   run: 'Run',
 };
 
