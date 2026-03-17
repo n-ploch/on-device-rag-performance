@@ -1,8 +1,6 @@
-# On-Device RAG Performance: A Quantization & Architecture Benchmark
+Running a RAG pipeline on-device means every model choice influences answer quality as well as system performance and load. This analysis focuses on small Mistral-family models — Ministral 3 (3B and 8B parameters) and Mistral 7B v0.3 — evaluated across quantization levels from Q3 to Q8, with the goal of mapping accurate quality–cost tradeoffs for context-grounded answer generation. Llama 3.2 3B serves as a widely-used small-model alternative for direct comparison, and Mistral Large via API provides the quality ceiling: what a capable, unconstrained model would score on the same questions.
 
-Running a RAG pipeline on-device means every model choice influences answer quality, system performance, and load. This analysis focuses on small Mistral-family models — Ministral 3 (3B and 8B parameters) and Mistral 7B v0.3 — evaluated across quantization levels from Q3 to Q8, with the goal of mapping accurate quality–cost tradeoffs for context-grounded answer generation. Llama 3.2 3B serves as a widely-used small-model alternative for direct comparison, and Mistral Large via API provides the quality ceiling: what a capable, unconstrained model would score on the same questions.
-
-The experiment holds retrieval constant — all configurations share the same `e5-large` retriever and ChromaDB collection — so that differences in answer correctness, faithfulness, and hallucination can be attributed squarely to the generator. Alongside these RAG-specific quality metrics, every inference is instrumented with latency, throughput, and hardware utilisation measurements, enabling direct reasoning about which configurations deliver good answers at acceptable system cost.
+The experiment holds retrieval constant, with all configurations sharinh the same `e5-large` retriever and ChromaDB collection, so that differences in answer correctness, faithfulness, and hallucination can be attributed squarely to the generator. Alongside these RAG-specific quality metrics, every inference is instrumented with latency, throughput, and hardware utilisation measurements, enabling direct reasoning about which configurations deliver good answers at acceptable system cost.
 
 ---
 
@@ -11,7 +9,7 @@ The experiment holds retrieval constant — all configurations share the same `e
 All results in this post were collected using **[RAGrig](https://github.com/n-ploch/RAGrig)**, an open-source orchestration tool that instruments a full RAG pipeline with [OpenTelemetry](https://opentelemetry.io/) (OTEL) spans, making retrieval and generation fully traceable and exportable to any OTEL-compatible backend. The tool follows an **Orchestrator + Worker** architecture:
 
 - The **Orchestrator** drives the evaluation loop and optionally ships OTEL spans to an external tracing backend (a self-hosted [Langfuse](https://langfuse.com/) instance was used for tracing experiments and LLM-based evaluation)
-- The **Worker** runs quantized GGUF models via `llama.cpp` servers on any hardware type.
+- The **Worker** runs quantized GGUF models via a `llama.cpp` server, making model deployment flexible.
 
 ---
 
@@ -21,7 +19,7 @@ All results in this post were collected using **[RAGrig](https://github.com/n-pl
 
 The benchmark uses a standard two-stage RAG pipeline with a fixed retrieval model and variable generation model:
 
-- **Dataset:** eManuals subset from [RAGBench](https://huggingface.co/datasets/rungalileo/ragbench) — 61 questions drawn from consumer electronics manuals, each with ground-truth answers and annotated relevant context chunks
+- **Dataset:** eManuals subset from [RAGBench](https://huggingface.co/datasets/rungalileo/ragbench) — 61 questions drawn from consumer electronics manuals, each with ground-truth answers and relevant context chunks
 - **Retrieval model:** `intfloat/multilingual-e5-large` (1024-dim embeddings, Q4 quantized), returning top-6 chunks via cosine similarity from a local ChromaDB collection
 - **Generator prompt:** The system prompt instructs the model to answer from the provided context chunks; completion capped at 256 tokens
 - **Evaluator (external):** Qwen3-235B scores each answer on three dimensions as judge. The LLM judges were implemented in Langfuse
@@ -106,11 +104,9 @@ The table below summarises all 16 configurations. Three patterns stand out immed
 | Mistral 7Bv0.3 Q8 | 0.73 | 0.12 | 0.90 | 21.1 | 117 | 11,170 | 13,946 | 2,787 |
 | **Mistral Large (ceiling)** | **0.84** | **0.07** | **0.92** | 63.4 | 241 | 5,510 | 5,069 | 647 | -->
 
-**Three patterns stand out:**
+1. **Ministral 3B outperforms Llama 3.2 3B at comparable or lower system cost.** At Q4, Ministral 3B achieves correctness of 0.74 versus 0.65 for Llama — a gap of nearly 10 percentage points — while using *less* RAM (7,323 MB vs 7,595 MB).
 
-1. **Scaling from 3B to 7/8B is a latency multiplier, but generates real quality improvements.** Moving from Ministral 3B to 8B approximately doubles E2E p90 latency (~6,700 ms → ~14,600 ms) and TTFT (~1,400 ms → ~3,100 ms). The quality return is real: hallucination drops ~6–10 percentage points and faithfulness improves by a similar margin.
-
-2. **Ministral 3B outperforms Llama 3.2 3B at comparable or lower system cost.** At Q4, Ministral 3B achieves correctness of 0.74 versus 0.65 for Llama — a gap of nearly 10 percentage points — while using *less* RAM (7,323 MB vs 7,595 MB).
+2. **Scaling from 3B to 7/8B is a latency multiplier, but generates real quality improvements.** Moving from Ministral 3B to 8B approximately doubles E2E p90 latency (~6,700 ms → ~14,600 ms) and TTFT (~1,400 ms → ~3,100 ms). The quality return is real: hallucination drops ~6–10 percentage points and faithfulness improves by a similar margin.
 
 3. **Mistral 7B consistently outputs fewer tokens.** Llama 3.2 3B and Ministral 3B produce a median of 180–256 completion tokens; Mistral 7B consistently outputs 110–156 tokens for the same questions. This verbosity gap keeps Mistral 7B E2E latency from scaling as badly as Ministral 8B.
 
@@ -140,9 +136,9 @@ The trade-off: Mistral-family generation runs roughly 2 seconds slower on averag
 
 ## Quantization: Diminishing Returns, Collapse at the Extremes
 
-Within each model family, returns diminish with increasing precision: moving from Q4 to Q5 to Q8 yields modest quality improvements at equally modest latency cost. **The dramatic exception is extreme compression** — IQ1 and Q2 for Llama 3.2, and IQ3 for Mistral 7B produce near-gibberish outputs, collapsing correctness toward zero and hallucination toward 1.0. The quality cliff is sharp, not gradual.
+Within each model family, returns diminish with increasing precision: moving from Q4 to Q5 to Q8 yields modest quality improvements at equally modest latency cost. **The exception is extreme compression** — IQ1 and Q2 for Llama 3.2, and IQ3 for Mistral 7B produce near-gibberish outputs, collapsing correctness toward zero and hallucination toward 1.0. The quality cliff is sharp, not gradual.
 
-**Apple Silicon works best with Q4/Q8 quantizations**: Mistral 7B at Q4 *outperforms* lower quantization levels on generation latency, explained by MPS hardware acceleration that is better aligned with 4-bit and 8-bit weight formats. Q8 performs nearly as fast as Q5 for both Llama and Ministral, meaning there is very little latency penalty for choosing the highest quality.
+**Apple Silicon works best with Q4/Q8 quantizations**: Mistral 7B at Q4 *outperforms* lower quantization levels on generation latency, probably related to Apple Metal being optimized for Q4 and Q8. Q8 performs nearly as fast as Q5 for both Llama and Ministral, meaning there is very little latency penalty for choosing the highest quality.
 
 The IQ quantizations are not only slower, they also drop substantially in quality — using low quantizations on hardware unoptimized for them yields no advantage at all.
 
@@ -154,7 +150,7 @@ The IQ quantizations are not only slower, they also drop substantially in qualit
 
 ![Ministral quality across quantization levels](https://raw.githubusercontent.com/n-ploch/RAGrig/main/blogs/assets/ministral_quality_quantization.png)
 
-### Mistral 7B v0.3: Quality Across Quantization Levels (IQ3 = collapse)
+### Mistral 7B v0.3: Quality Across Quantization Levels
 
 ![Mistral 7B quality across quantization levels](https://raw.githubusercontent.com/n-ploch/RAGrig/main/blogs/assets/mistral7b_quality_quantization.png)
 
