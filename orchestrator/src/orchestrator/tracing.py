@@ -20,7 +20,7 @@ from opentelemetry.propagate import set_global_textmap
 from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 if TYPE_CHECKING:
@@ -110,10 +110,8 @@ async def verify_tracing_connection(observability: "ObservabilityConfig | None")
 
     if observability is not None and observability.backends:
         active_backends = [b for b in observability.backends if b.enabled]
-    elif observability is None or observability.langfuse:
-        active_backends = [OTLPBackendConfig(type="langfuse")]
     else:
-        return  # tracing disabled — nothing to check
+        return  # no backends configured — nothing to check
 
     for backend in active_backends:
         url, headers = _endpoint_and_headers(backend.type)
@@ -151,8 +149,7 @@ def setup_tracing(
 
     Backend selection:
       - When observability.backends is non-empty, those backends are used.
-      - When observability.langfuse is True (legacy flag), a Langfuse backend is used.
-      - When observability is None, falls back to the Langfuse legacy path.
+      - Otherwise no OTLP backends are registered (spans are not exported remotely).
 
     Args:
         service_name: Service name for resource identification.
@@ -166,8 +163,6 @@ def setup_tracing(
     # Determine active backend list
     if observability is not None and observability.backends:
         active_backends = [b for b in observability.backends if b.enabled]
-    elif observability is None or observability.langfuse:
-        active_backends = [OTLPBackendConfig(type="langfuse")]
     else:
         active_backends = []
 
@@ -198,6 +193,14 @@ def setup_tracing(
 
     if registered == 0:
         logger.warning("No OTEL backends registered — spans will not be exported")
+
+    # Always write spans locally when output_jsonl is configured
+    if observability is not None and observability.output_jsonl:
+        from orchestrator.exporters.jsonl import JSONLSpanExporter
+
+        local_exporter = JSONLSpanExporter(observability.output_jsonl)
+        provider.add_span_processor(SimpleSpanProcessor(local_exporter))
+        logger.info("Local JSONL export enabled: %s", observability.output_jsonl)
 
     trace.set_tracer_provider(provider)
     set_global_textmap(CompositePropagator([TraceContextTextMapPropagator()]))

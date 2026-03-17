@@ -9,8 +9,10 @@ dataset:
     ground_truth: null
 
 observability:
-  langfuse: true  # Set to true for Langfuse cloud, false for local JSONL
-  output_jsonl: "./logs/traces.jsonl"
+  backends:
+    - type: "langfuse"
+      enabled: true
+  output_jsonl: "./logs/traces.jsonl"  # omit or set to null to disable local JSONL export
   sys_logs_path: "./logs/runner.log"  # Path to write Python logs (null for no file logging, e.g., "./logs/runner.log")
   print_logs: true  # Whether to print logs to terminal
 

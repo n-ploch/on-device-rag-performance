@@ -413,22 +413,6 @@ def _check_run_preconditions(state: _AppState, dry_run: bool = False) -> None:
                         "Configure them in the Environment tab."
                     ),
                 )
-    elif obs.langfuse:
-        # Legacy single-backend path
-        missing = [
-            k
-            for k in _BACKEND_REQUIRED_VARS["langfuse"]
-            if not os.environ.get(k)
-        ]
-        if missing:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Langfuse is enabled in the config but {' and '.join(missing)} "
-                    "are not set. Configure them in the Environment tab or set "
-                    "'langfuse: false' in your config."
-                ),
-            )
 
 
 # ---------------------------------------------------------------------------
