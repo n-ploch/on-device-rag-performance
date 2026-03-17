@@ -1,5 +1,9 @@
 # all local stuff
 .*
+!.claude/
+!.claude/commands/
+!.claude/commands/*
+.claude/settings.local.json
 local/
 logs/
 
