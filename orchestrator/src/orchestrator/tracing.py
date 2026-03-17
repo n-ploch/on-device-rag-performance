@@ -20,7 +20,7 @@ from opentelemetry.propagate import set_global_textmap
 from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SimpleSpanProcessor
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 if TYPE_CHECKING:
@@ -198,6 +198,14 @@ def setup_tracing(
 
     if registered == 0:
         logger.warning("No OTEL backends registered — spans will not be exported")
+
+    # Always write spans locally when output_jsonl is configured
+    if observability is not None and observability.output_jsonl:
+        from orchestrator.exporters.jsonl import JSONLSpanExporter
+
+        local_exporter = JSONLSpanExporter(observability.output_jsonl)
+        provider.add_span_processor(SimpleSpanProcessor(local_exporter))
+        logger.info("Local JSONL export enabled: %s", observability.output_jsonl)
 
     trace.set_tracer_provider(provider)
     set_global_textmap(CompositePropagator([TraceContextTextMapPropagator()]))

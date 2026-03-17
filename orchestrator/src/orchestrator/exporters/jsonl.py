@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Sequence
+
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 
 def _typed_attribute_value(value):
@@ -18,7 +22,7 @@ def _typed_attribute_value(value):
     return {"stringValue": str(value)}
 
 
-class JSONLSpanExporter:
+class JSONLSpanExporter(SpanExporter):
     """Serialize spans to newline-delimited JSON documents."""
 
     def __init__(self, output_path: str):
@@ -26,11 +30,12 @@ class JSONLSpanExporter:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self.output_path.open("a", encoding="utf-8")
 
-    def export(self, spans) -> None:
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         for span in spans:
             payload = self._serialize_span(span)
             self._file.write(json.dumps(payload) + "\n")
         self._file.flush()
+        return SpanExportResult.SUCCESS
 
     def shutdown(self) -> None:
         if not self._file.closed:

@@ -211,11 +211,14 @@ async def evaluate_single(
 
         # Enrich span with response data and metrics
         span.set_attribute("gen_ai.completion", gen_response.output)
+        span.set_attribute("custom.evaluation.expected_answer", entry.expected_response or "")
 
-        # Build retrieval context string
+        # Retrieval data
         ret = gen_response.retrieval_data
         retrieval_context = "\n---\n".join(ret.retrieved_chunks) if ret.retrieved_chunks else ""
-        span.set_attribute("retrieval_context", retrieval_context)
+        span.set_attribute("custom.retrieval.context", retrieval_context)
+        span.set_attribute("custom.retrieval.cited_doc_ids", ",".join(ret.cited_doc_ids))
+        span.set_attribute("custom.retrieval.k", len(ret.cited_doc_ids))
 
         # Metrics
         span.set_attribute("custom.metrics.abstention", is_abstention)
@@ -226,10 +229,19 @@ async def evaluate_single(
         if result_mrr is not None:
             span.set_attribute("custom.metrics.mrr", result_mrr)
 
-        # Latency and hardware from inference measurement
+        # Latency
         inf = gen_response.inference_measurement
         span.set_attribute("custom.latency.e2e_latency_ms", inf.e2e_latency_ms)
+        span.set_attribute("custom.latency.retrieval_latency_ms", inf.retrieval_latency_ms)
+        span.set_attribute("custom.latency.ttft_ms", inf.ttft_ms)
+        span.set_attribute("custom.latency.llm_generation_latency_ms", inf.llm_generation_latency_ms)
 
+        # Generation
+        span.set_attribute("custom.generation.prompt_tokens", inf.prompt_tokens)
+        span.set_attribute("custom.generation.completion_tokens", inf.completion_tokens)
+        span.set_attribute("custom.generation.tokens_per_second", inf.tokens_per_second)
+
+        # Hardware
         hw = gen_response.hardware_measurement
         span.set_attribute("custom.hardware.max_ram_usage_mb", hw.max_ram_usage_mb)
         span.set_attribute("custom.hardware.avg_cpu_utilization_pct", hw.avg_cpu_utilization_pct)
