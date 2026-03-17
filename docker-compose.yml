@@ -26,7 +26,7 @@ services:
       LOCAL_DATASETS_DIR: /app/local/datasets
 
       # ── Langfuse tracing ────────────────────────────────────────────────────
-      LANGFUSE_BASE_URL: https://host.docker.internal:3000
+      LANGFUSE_BASE_URL: http://host.docker.internal:3000
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
 
