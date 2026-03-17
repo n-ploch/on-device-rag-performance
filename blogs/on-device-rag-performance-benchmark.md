@@ -85,7 +85,9 @@ One run configuration includes a dataset (with ground truth entries), a retrieva
 
 The table below summarises all 16 configurations. Three patterns stand out immediately and are explored in detail in the sections that follow.
 
-| Model | Correctness | Hallucination | Faithfulness | Tokens/sec | Completion tokens | RAM (MB) | E2E p90 (ms) | TTFT p90 (ms) |
+![Overview table with configuration summary](https://raw.githubusercontent.com/n-ploch/RAGrig/main/blogs/assets/overview_table.png)
+
+<!-- | Model | Correctness | Hallucination | Faithfulness | Tokens/sec | Completion tokens | RAM (MB) | E2E p90 (ms) | TTFT p90 (ms) |
 |---|---|---|---|---|---|---|---|---|
 | Llama 3.2 3B IQ1 | 0.16 | 0.84 | 0.23 | 44.9 | 256 | 6,539 | 7,089 | 1,221 |
 | Llama 3.2 3B Q2 | 0.67 | 0.25 | 0.83 | 47.9 | 256 | 8,657 | 6,737 | 1,272 |
@@ -102,7 +104,7 @@ The table below summarises all 16 configurations. Three patterns stand out immed
 | Mistral 7Bv0.3 Q3L | 0.74 | 0.13 | 0.89 | 21.4 | 110 | 8,532 | 14,118 | 3,344 |
 | **Mistral 7Bv0.3 Q4** | **0.70** | **0.15** | **0.90** | 25.9 | 127 | 8,853 | 12,337 | 3,072 |
 | Mistral 7Bv0.3 Q8 | 0.73 | 0.12 | 0.90 | 21.1 | 117 | 11,170 | 13,946 | 2,787 |
-| **Mistral Large (ceiling)** | **0.84** | **0.07** | **0.92** | 63.4 | 241 | 5,510 | 5,069 | 647 |
+| **Mistral Large (ceiling)** | **0.84** | **0.07** | **0.92** | 63.4 | 241 | 5,510 | 5,069 | 647 | -->
 
 **Three patterns stand out:**
 
@@ -208,7 +210,9 @@ Comparing low-recall (recall@6 < 0.4) and high-recall (recall@6 ≥ 0.8) claims 
 
 ### Quality by Recall Regime — Full Table
 
-| Model | Corr Low | Corr High | Hall Low | Hall High | Faith Low | Faith High | Tokens Low | Tokens High |
+![Full Table quality metrics by recall regime](https://raw.githubusercontent.com/n-ploch/RAGrig/main/blogs/assets/recall_table.png)
+
+<!-- | Model | Corr Low | Corr High | Hall Low | Hall High | Faith Low | Faith High | Tokens Low | Tokens High |
 |---|---|---|---|---|---|---|---|---|
 | Llama 3.2 3B IQ1 | 0.13 | 0.17 | 0.83 | 0.84 | 0.26 | 0.25 | 256 | 256 |
 | Llama 3.2 3B Q2 | 0.52 | 0.71 | 0.10 | 0.24 | 0.84 | 0.86 | 256 | 256 |
@@ -225,7 +229,7 @@ Comparing low-recall (recall@6 < 0.4) and high-recall (recall@6 ≥ 0.8) claims 
 | Mistral 7Bv0.3 Q3L | 0.63 | 0.78 | 0.10 | 0.13 | 0.94 | 0.90 | 92 | 118 |
 | Mistral 7Bv0.3 Q4 | 0.59 | 0.72 | 0.15 | 0.15 | 0.88 | 0.91 | 98 | 134 |
 | Mistral 7Bv0.3 Q8 | 0.61 | 0.73 | 0.08 | 0.13 | 0.88 | 0.92 | 82 | 124 |
-| Mistral Large (ceiling) | 0.72 | 0.86 | 0.09 | 0.07 | 0.95 | 0.95 | 177 | 241 |
+| Mistral Large (ceiling) | 0.72 | 0.86 | 0.09 | 0.07 | 0.95 | 0.95 | 177 | 241 | -->
 
 **Key observations:**
 
@@ -266,6 +270,10 @@ Though trends are clearly identifiable, the variance driven partly by LLM-judges
 ---
 
 ## Appendix: Detailed Distributions
+
+### Latency Metrics (median, p25–p75 error bars)
+
+![Appendix: quality metrics across all configurations](https://raw.githubusercontent.com/n-ploch/RAGrig/main/blogs/assets/appendix_quality_metrics.png)
 
 ### Latency Metrics (median, p25–p75 error bars)
 
