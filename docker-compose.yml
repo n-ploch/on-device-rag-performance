@@ -24,6 +24,7 @@ services:
       # ── Local paths (relative to the /app/local volume mount) ───────────────
       LOCAL_MODELS_DIR: /app/local/models
       LOCAL_DATASETS_DIR: /app/local/datasets
+      LOCAL_COLLECTIONS_DIR: /app/local/collections
 
       # ── Langfuse tracing ────────────────────────────────────────────────────
       LANGFUSE_BASE_URL: http://host.docker.internal:3000
