@@ -77,7 +77,7 @@ Or manually:
 
 ```bash
 source .rag/bin/activate
-uvicorn worker.main:create_app --factory --host 0.0.0.0 --port 8000
+rag-worker --host 0.0.0.0 --port 8000
 ```
 
 Confirm it is up:

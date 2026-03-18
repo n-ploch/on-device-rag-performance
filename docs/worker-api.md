@@ -17,11 +17,11 @@ communicates with it over HTTP.
 The script activates the venv, validates required environment variables, and
 launches uvicorn. Requires `.rag/` venv (run `./scripts/setup.sh` first).
 
-### Manual uvicorn command
+### Manual (entry point)
 
 ```bash
 source .rag/bin/activate
-uvicorn worker.main:create_app --factory --host 0.0.0.0 --port 8000
+rag-worker --host 0.0.0.0 --port 8000 --log-level info
 ```
 
 ### Required environment variables

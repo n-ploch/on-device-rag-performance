@@ -96,18 +96,17 @@ pytest tests/integration -v  # requires worker running on localhost:8000
 ```bash
 # Start worker (bare-metal, edge device)
 ./scripts/start-worker.sh
-# or: uvicorn worker.main:create_app --factory --host 0.0.0.0 --port 8000
+# or: rag-worker --host 0.0.0.0 --port 8000
 
-# Start orchestrator + frontend via Docker
-./scripts/start-docker.sh    # ports 8080, 3003
-
-# Development mode (no Docker)
+# Development mode (no Docker): orchestrator API + Vite frontend
 ./scripts/start-ui.sh        # rag-api on 8080 + Vite on 5173
+
+# Production: orchestrator API + frontend via Docker Compose
+docker compose up --build -d   # detached; ports 8080, 3003
 
 # Run evaluation (CLI)
 source .rag/bin/activate
-make eval CONFIG=config/sample_config.yaml
-# or: rag-orchestrator --config config/sample_config.yaml
+rag-orchestrator --config config/sample_config.yaml
 
 # Validate config without running
 rag-orchestrator --config config/sample_config.yaml --dry-run

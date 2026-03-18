@@ -117,12 +117,6 @@ rag-orchestrator --config config/my_experiment.yaml -q
 
 Exit code 0 = success. Non-zero = error (check stderr).
 
-### Make shortcut
-
-```bash
-make eval CONFIG=config/my_experiment.yaml
-```
-
 ### Via HTTP API (programmatic / streaming)
 
 ```bash

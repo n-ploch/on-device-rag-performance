@@ -123,17 +123,35 @@ full HTTP API reference.
 ### Usage
 
 ```bash
-rag-api
-# or equivalently:
-uvicorn orchestrator.api:app --host 127.0.0.1 --port 8080
+rag-api [--log-level LEVEL]
 ```
 
 The server listens on `http://127.0.0.1:8080` by default.
 Interactive API docs are available at `http://127.0.0.1:8080/docs`.
 
-### Make shortcuts
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--log-level LEVEL` | `-l` | `info` | Logging level (`debug`, `info`, `warning`, `error`, `critical`) |
+
+For the full UI (API + frontend), use `./scripts/start-ui.sh` instead.
+
+---
+
+## `rag-worker` — start the worker HTTP server
+
+Starts the edge-device FastAPI worker. Installed into the venv via
+`pip install -e ./worker`.
+
+### Usage
 
 ```bash
-make orchestrator   # starts rag-api
-make ui             # starts rag-api + Vite dev frontend
+rag-worker [--host HOST] [--port PORT] [--log-level LEVEL]
 ```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--host HOST` | | `0.0.0.0` | Bind host |
+| `--port PORT` | | `8000` | Bind port |
+| `--log-level LEVEL` | `-l` | `info` | Logging level (`debug`, `info`, `warning`, `error`, `critical`) |
+
+For the standard startup (env validation + logging banner), use `./scripts/start-worker.sh` instead.
