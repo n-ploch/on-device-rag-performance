@@ -5,6 +5,7 @@ import type {
   DryRunResultEvent,
   EntryErrorEvent,
   EntryResultEvent,
+  LoadingModelsEvent,
   RunCompleteEvent,
   RunEvent,
   RunStartEvent,
@@ -17,6 +18,7 @@ interface Props {
 }
 
 interface RunState {
+  loadingModels: LoadingModelsEvent | null;
   runStart: RunStartEvent | null;
   lastResult: EntryResultEvent | null;
   summary: RunCompleteEvent | null;
@@ -27,6 +29,7 @@ interface RunState {
 }
 
 const EMPTY_STATE: RunState = {
+  loadingModels: null,
   runStart: null,
   lastResult: null,
   summary: null,
@@ -234,6 +237,20 @@ function ErrorBox({ title, message }: { title: string; message: string }) {
   );
 }
 
+function LoadingModelsBox({ ev }: { ev: LoadingModelsEvent }) {
+  return (
+    <div className="loading-models-box">
+      <div className="spinner" />
+      <div>
+        <div className="loading-models-title">Loading models… Might take some minutes if model is not locally available yet…</div>
+        <div className="loading-models-msg">
+          {ev.total_configs > 1 ? `Config ${ev.config_index} of ${ev.total_configs} — ` : ''}{ev.run_id}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function RunTab({ status, onBack }: Props) {
@@ -248,9 +265,13 @@ export function RunTab({ status, onBack }: Props) {
 
   function handleEvent(event: RunEvent) {
     switch (event.type) {
+      case 'loading_models':
+        setRunState((s) => ({ ...s, loadingModels: event }));
+        break;
       case 'run_start':
         setRunState((s) => ({
           ...s,
+          loadingModels: null,
           runStart: event,
           lastResult: null,
           summary: null,
@@ -348,6 +369,9 @@ export function RunTab({ status, onBack }: Props) {
       {disabledReason && (
         <p className="disabled-reason">{disabledReason}</p>
       )}
+
+      {/* Loading models indicator */}
+      {runState.loadingModels && <LoadingModelsBox ev={runState.loadingModels} />}
 
       {/* Progress section */}
       {runStart && (
