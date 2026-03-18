@@ -115,26 +115,6 @@ rag-orchestrator --config config/my_experiment.yaml -q
 
 Exit code 0 = success. Non-zero = error (check stderr).
 
-### Via HTTP API (programmatic / streaming)
-
-```bash
-# 1. Load config
-curl -s -X POST http://localhost:8080/api/config/load \
-  -H "Content-Type: application/json" \
-  -d '{"path": "config/my_experiment.yaml"}'
-
-# 2. Stream evaluation (SSE — keep connection open)
-curl -s -N -X POST http://localhost:8080/api/run \
-  -H "Content-Type: application/json" -d '{}'
-
-# 3. Stop early if needed
-curl -s -X POST http://localhost:8080/api/stop
-```
-
-SSE events: `run_start` → `entry_result` (one per entry) → `run_complete` → `done`.
-
----
-
 ## Interpreting results
 
 ### Output files

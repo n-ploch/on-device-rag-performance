@@ -102,19 +102,12 @@ If any path is missing or the directory doesn't exist, stop and ask the user.
 ./scripts/start-worker.sh
 ```
 
-Or manually:
-
-```bash
-source .rag/bin/activate
-rag-worker --host 0.0.0.0 --port 8000
-```
-
 Remember the PID for the worker process to grep logs and information on the worker later. Important for troubleshooting.
 
 Confirm it is up:
 
 ```bash
-curl -s $WORKER_URL$/health
+curl -s $WORKER_URL/health
 # expect: {"status":"ok"}
 ```
 
