@@ -41,7 +41,7 @@ for this experiment.**
    [Pre-flight checklist](#pre-flight-checklist).
 2. If no argument was passed, check whether `config/config.yaml` or
    `config/my_experiment.yaml` exists. If a plausible config file is present,
-   confirm with the user before using it.
+   confirm with the user before using it or whether another config should be used. Offer to create a new one with `skills/ragrig-config.md`.
 3. If **no config file exists** → stop and run the config creation flow:
    - Tell the user: *"No config file found. Creating a config file is the
      required first step. Let me guide you through it."*
