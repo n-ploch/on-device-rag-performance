@@ -23,7 +23,7 @@ rag-orchestrator [OPTIONS]
 | `--config PATH` | `-c` | `config/config.yaml` | Path to evaluation config YAML |
 | `--dry-run` | | off | Validate config and count entries without running evaluation |
 | `--quiet` | `-q` | off | Suppress per-entry progress output |
-| `--verbose` | `-v` | off | Enable debug-level logging |
+| `--log-level LEVEL` | `-l` | `info` | Logging level (`debug`, `info`, `warning`, `error`, `critical`) |
 | `--run-id ID` | | all | Run only the specified `run_id` from the config |
 
 ### Exit codes
@@ -49,7 +49,7 @@ rag-orchestrator --config config/my_experiment.yaml --dry-run
 rag-orchestrator --config config/my_experiment.yaml --run-id mistral_q4_run1
 
 # Enable debug logging
-rag-orchestrator -v
+rag-orchestrator --log-level debug
 ```
 
 ### Output files
@@ -73,7 +73,6 @@ rag-orchestrator -v
 | `LANGFUSE_SECRET_KEY` | If using Langfuse | Langfuse secret key |
 | `HF_TOKEN` | If gated dataset | HuggingFace access token |
 | `LLM_API_KEY` | If remote generation | API key for remote LLM |
-| `LOG_LEVEL` | No | Logging level (default: `INFO`) |
 
 ---
 

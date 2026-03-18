@@ -217,7 +217,7 @@ on-device-rag-performance/
 | `LANGFUSE_SECRET_KEY` | If using Langfuse | Langfuse secret key |
 | `HF_TOKEN` | If gated dataset | HuggingFace access token |
 | `LLM_API_KEY` | If remote generation | Remote LLM API key |
-| `LOG_LEVEL` | No | Logging level (default: `INFO`) |
+
 
 See [.env.example](.env.example) for all variables with comments.
 

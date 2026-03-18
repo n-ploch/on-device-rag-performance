@@ -127,7 +127,7 @@ Entry point defined in `orchestrator/pyproject.toml`.
 | `--config PATH` / `-c` | `config/config.yaml` | Path to evaluation YAML |
 | `--dry-run` | off | Validate config and count entries, no inference |
 | `--run-id ID` | all | Run only one `run_id` from the config |
-| `--verbose` / `-v` | off | DEBUG logging |
+| `--log-level LEVEL` / `-l` | `info` | Logging level (`debug`, `info`, `warning`, `error`, `critical`) |
 | `--quiet` / `-q` | off | Suppress per-entry output |
 
 Exit 0 = success. Non-zero = error (check stderr).

@@ -109,7 +109,7 @@ rag-orchestrator --config config/my_experiment.yaml
 rag-orchestrator --config config/my_experiment.yaml --run-id <run_id>
 
 # Verbose logging
-rag-orchestrator --config config/my_experiment.yaml -v
+rag-orchestrator --config config/my_experiment.yaml --log-level debug
 
 # Quiet (suppress per-entry output)
 rag-orchestrator --config config/my_experiment.yaml -q

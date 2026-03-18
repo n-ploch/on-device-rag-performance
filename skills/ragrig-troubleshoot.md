@@ -33,7 +33,7 @@ curl -s http://localhost:8080/api/worker/check
 
 # Validate config without running
 source .rag/bin/activate
-rag-orchestrator --config config/my_experiment.yaml --dry-run -v
+rag-orchestrator --config config/my_experiment.yaml --dry-run --log-level debug
 
 # Collection status
 curl -s -X POST $WORKER_URL$/collection/status \
