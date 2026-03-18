@@ -442,7 +442,7 @@ async def _run(
             validation = orchestrator.validate_dataset()
             entries = load_ground_truth(validation.ground_truth_path)
             logger.info(
-                "Dry run complete. Would evaluate %d entries x %d configs",
+                "Dry run complete. %d configs present.",
                 len(entries),
                 len(run_configs),
             )
@@ -502,10 +502,11 @@ def main() -> int:
         help="Suppress progress output",
     )
     parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Enable verbose logging",
+        "--log-level",
+        "-l",
+        default="info",
+        choices=["debug", "info", "warning", "error", "critical"],
+        help="Logging level (default: info)",
     )
     parser.add_argument(
         "--run-id",
@@ -517,7 +518,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Configure initial logging (will be reconfigured after loading config)
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+    log_level = getattr(logging, args.log_level.upper())
     configure_logging(level=log_level, print_logs=True, sys_logs_path=None)
 
     # Validate config path

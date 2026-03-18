@@ -1,0 +1,21 @@
+---
+description: RAGrig distributed RAG evaluation — operator skills for setup, evaluation, analysis, and troubleshooting
+alwaysApply: false
+globs:
+  - "config/*.yaml"
+  - "scripts/*.sh"
+  - ".env*"
+---
+
+# RAGrig Skills
+
+When asked to operate RAGrig, load and follow the appropriate skill file:
+
+| User intent | Skill file |
+|-------------|-----------|
+| Set up / bootstrap | `skills/ragrig-setup.md` |
+| Run an evaluation / benchmark | `skills/ragrig-evaluate.md` |
+| Export / analyze results / open notebook | `skills/ragrig-analyze.md` |
+| Diagnose a failure / something not working | `skills/ragrig-troubleshoot.md` |
+
+For project architecture, API reference, and env vars: `AGENTS.md`

@@ -1,0 +1,153 @@
+# RAGrig — Advanced Configuration Reference
+#
+# This file documents every available parameter with a short description.
+# Fields are marked [required] or [optional: <default>].
+# Copy this file, remove what you don't need, and adjust the values.
+#
+# Canonical schema: orchestrator/src/orchestrator/config.py (EvalConfig)
+#                   shared/src/shared_types/schemas.py (RunConfig and nested models)
+# Full prose docs:  docs/config.md
+
+# ---------------------------------------------------------------------------
+# dataset                                                            required
+# ---------------------------------------------------------------------------
+# Defines which dataset to benchmark against.
+# The dataset is downloaded from HuggingFace on first use and cached locally.
+
+dataset:
+  id: &dataset_id "ragbench_emanual"  # [required] Unique identifier; used as an anchor so
+                                       # run_configs can reference it as *dataset_id
+  name: "ragbench"                     # [required] Loader name: "ragbench" | "scifact"
+  limits:
+    corpus: null        # [optional: null] Max corpus documents to load (null = all)
+    ground_truth: null  # [optional: null] Max ground truth entries to load (null = all)
+
+# ---------------------------------------------------------------------------
+# observability                                              optional section
+# ---------------------------------------------------------------------------
+# Controls where traces and logs are sent.
+# Multiple backends can be active simultaneously.
+
+observability:
+  backends:                            # [optional: []] List of OTEL export targets
+    # Langfuse (self-hosted or cloud)
+    # Required env vars: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_BASE_URL
+    - type: "langfuse"                 # [required] "langfuse" | "weave" | "generic"
+      enabled: true                    # [optional: true]
+
+    # Weights & Biases Weave
+    # Required env vars: WANDB_API_KEY, WANDB_BASE_URL
+    # Optional env vars: WANDB_ENTITY, WANDB_PROJECT
+    - type: "weave"
+      enabled: false
+
+    # Any generic OTLP endpoint (e.g. Jaeger, Grafana Tempo)
+    # Required env vars: OTEL_EXPORTER_OTLP_ENDPOINT
+    # Optional env vars: OTEL_EXPORTER_OTLP_HEADERS
+    - type: "generic"
+      enabled: false
+
+  output_jsonl: "./logs/traces.jsonl"  # [optional: null]  Local JSONL span export (null = disabled)
+  sys_logs_path: "./logs/runner.log"   # [optional: null]  Python log file path (null = no file)
+  print_logs: true                     # [optional: true]  Echo logs to stdout
+
+# ---------------------------------------------------------------------------
+# server                                                     optional section
+# ---------------------------------------------------------------------------
+# llama-server settings applied to both the embedding and generation servers.
+# These are device-level knobs; sensible defaults work for most setups.
+# Context sizes differ per server type and are configured separately.
+
+server:
+  embedding_n_ctx: 512    # [optional: 512]   Context window for the embedding server (-c)
+                          #                   Should match or exceed the chunk_size used during retrieval
+  generation_n_ctx: 2048  # [optional: 2048]  Context window for the generation server (-c)
+                          #                   Must be large enough for: system prompt + k chunks + answer
+  n_gpu_layers: -1        # [optional: -1]    Layers to offload to GPU (-ngl); -1 = all, 0 = CPU-only
+  n_threads: null         # [optional: null]  CPU threads (-t); null = llama-server default (all physical cores)
+  n_batch: null           # [optional: null]  Logical prompt batch size (-b); null = llama-server default (512)
+  flash_attn: false       # [optional: false] Flash attention (-fa); speeds up generation on compatible GPUs/Metal
+                          #                   Do NOT enable for encoder-only embedding models (e.g. E5/BERT)
+  tensor_split: null      # [optional: null]  Multi-GPU layer split (-ts); comma-separated fractions, e.g. "3,1"
+                          #                   Only applied when the string contains a comma
+  no_kv_offload: false    # [optional: false] Keep KV cache in system RAM instead of GPU VRAM (-nkvo)
+                          #                   Useful on Apple Silicon when unified memory is under pressure
+
+# ---------------------------------------------------------------------------
+# run_configs                                                        required
+# ---------------------------------------------------------------------------
+# One or more benchmark runs. Each run defines an embedding model, a generation
+# model, and retrieval parameters. Runs are executed sequentially.
+
+run_configs:
+
+  # ── Example 1: local embedding + local generation ──────────────────────
+  - run_id: "e5_large_llama3_q4_local"  # [required] Unique identifier for this run (used in traces)
+    limit: 50        # [optional: null] Evaluate only the first N ground truth entries (null = all)
+    repeat: 3        # [optional: null] Repeat this run N times with a fresh session ID each time (null = 1)
+                     #                 Useful for measuring variance across identical conditions
+
+    retrieval:
+      dataset_id: *dataset_id      # [required] References the dataset.id anchor above
+      model: "ChristianAzinn/e5-large-v2-gguf"  # [required] HuggingFace repo for the embedding model
+      quantization: "q4_k_m"      # [required] GGUF quantization file to use from that repo
+      dimensions: 1024             # [required] Embedding vector dimensions (must match the model)
+      k: 6                         # [optional: 3] Number of chunks to retrieve per query
+
+      chunking:                    # [optional: null] Omit if the corpus collection already exists
+        strategy: "fixed"          # [required] "fixed" | "char_split"
+        chunk_size: 500            # [required for fixed]  Characters per chunk
+        chunk_overlap: 64          # [optional: 0] Overlap between consecutive chunks in characters
+        # split_sequence: "\n\n"   # [required for char_split] Delimiter; ignored for fixed
+
+    generation:
+      model: "unsloth/Llama-3.2-3B-Instruct-GGUF"  # [required] HuggingFace repo (local) or API model name (remote)
+      quantization: "q4_k_m"      # [optional: "q4_k_m"] GGUF quantization; ignored when hosting: remote
+      hosting: "local"             # [optional: "local"] "local" (llama-server) | "remote" (OpenAI-compatible API)
+
+  # ── Example 2: local embedding + remote generation ─────────────────────
+  - run_id: "e5_large_mistral_large_remote"
+    limit: 10                      # [optional: null]
+    # repeat omitted → defaults to null (run once)
+
+    retrieval:
+      dataset_id: *dataset_id
+      model: "ChristianAzinn/e5-large-v2-gguf"
+      quantization: "q4_k_m"
+      dimensions: 1024
+      k: 6
+      chunking:
+        strategy: "fixed"
+        chunk_size: 500
+        chunk_overlap: 64
+
+    generation:
+      model: "mistral-large-latest"  # [required] Model name sent to the remote API
+      # quantization is ignored when hosting: remote
+      hosting: "remote"              # [required to enable remote] triggers the remote block below
+      remote:                        # [required when hosting: remote]
+        base_url: "https://api.mistral.ai/v1"  # [required] OpenAI-compatible base URL
+        api_key_env: "LLM_API_KEY"             # [optional: "OPENAI_API_KEY"] Env var holding the API key
+        extra_headers:                          # [optional: {}] Additional HTTP headers
+          Content-Type: "application/json"
+        rate_limit_rps: 1.0                    # [optional: null] Max requests/second (null = unlimited)
+
+  # ── Example 3: char_split chunking strategy ────────────────────────────
+  - run_id: "e5_large_llama3_charsplit"
+    limit: 20
+
+    retrieval:
+      dataset_id: *dataset_id
+      model: "ChristianAzinn/e5-large-v2-gguf"
+      quantization: "q4_k_m"
+      dimensions: 1024
+      k: 4
+      chunking:
+        strategy: "char_split"
+        split_sequence: "."     # [required for char_split] Split on double newlines (paragraph boundaries)
+        chunk_overlap: 0           # [optional: 0]
+
+    generation:
+      model: "unsloth/Llama-3.2-3B-Instruct-GGUF"
+      quantization: "q4_k_m"
+      hosting: "local"

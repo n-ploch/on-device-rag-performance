@@ -10,6 +10,7 @@ It handles:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass
@@ -287,18 +288,31 @@ class Orchestrator:
         if not self._client:
             raise RuntimeError("Orchestrator must be used as async context manager")
 
+        srv = self.config.server
         request = LoadModelsRequest(
             embedder_repo=run_config.retrieval.model,
             embedder_quantization=run_config.retrieval.quantization,
             generator_repo=run_config.generation.model,
             generator_quantization=run_config.generation.quantization,
             embedder_config=ServerConfig(
-                n_ctx=512,
-                parallel_slots=1
+                n_ctx=srv.embedding_n_ctx,
+                parallel_slots=1,
+                n_gpu_layers=srv.n_gpu_layers,
+                n_threads=srv.n_threads,
+                n_batch=srv.n_batch,
+                flash_attn=srv.flash_attn,
+                tensor_split=srv.tensor_split,
+                no_kv_offload=srv.no_kv_offload,
             ),
             generator_config=ServerConfig(
-                n_ctx=2048,
-                parallel_slots=1
+                n_ctx=srv.generation_n_ctx,
+                parallel_slots=1,
+                n_gpu_layers=srv.n_gpu_layers,
+                n_threads=srv.n_threads,
+                n_batch=srv.n_batch,
+                flash_attn=srv.flash_attn,
+                tensor_split=srv.tensor_split,
+                no_kv_offload=srv.no_kv_offload,
             ),
             generation_config=run_config.generation,
         )
@@ -424,16 +438,18 @@ class Orchestrator:
 
         return statuses
 
-    def _ensure_models(self) -> None:
+    async def _ensure_models(self) -> None:
         """Ensure all required models are available locally.
 
-        Downloads missing models from HuggingFace Hub.
+        Downloads missing models from HuggingFace Hub. Runs in a thread
+        executor so the event loop remains free to flush SSE events during
+        potentially long downloads.
 
         Raises:
             ModelPreparationError: If model preparation fails.
         """
         try:
-            statuses = ensure_models(self.config, self.models_dir)
+            statuses = await asyncio.to_thread(ensure_models, self.config, self.models_dir)
             for status in statuses:
                 if status.downloaded:
                     logger.info(
@@ -463,7 +479,7 @@ class Orchestrator:
             httpx.HTTPError: If worker communication fails.
         """
         logger.info("Validating global prerequisites...")
-        self._ensure_models()
+        await self._ensure_models()
         self.validate_dataset()
         await self.check_worker_health(require_models=False)
         logger.info("Global prerequisites validated")

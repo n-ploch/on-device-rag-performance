@@ -5,8 +5,7 @@ services:
     build:
       context: .
       dockerfile: orchestrator/Dockerfile
-    # Override the default CLI command to start the FastAPI server instead
-    command: ["uvicorn", "orchestrator.api:app", "--host", "0.0.0.0", "--port", "8080"]
+    command: ["rag-api", "--log-level", "${LOG_LEVEL:-info}"]
     ports:
       - "8080:8080"
     volumes:
@@ -24,6 +23,7 @@ services:
       # ── Local paths (relative to the /app/local volume mount) ───────────────
       LOCAL_MODELS_DIR: /app/local/models
       LOCAL_DATASETS_DIR: /app/local/datasets
+      LOCAL_COLLECTIONS_DIR: /app/local/collections
 
       # ── Langfuse tracing ────────────────────────────────────────────────────
       LANGFUSE_BASE_URL: http://host.docker.internal:3000

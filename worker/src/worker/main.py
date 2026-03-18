@@ -139,6 +139,9 @@ def create_app() -> FastAPI:
             n_ctx=embedder_cfg.n_ctx if embedder_cfg and embedder_cfg.n_ctx else 512,
             n_gpu_layers=embedder_cfg.n_gpu_layers if embedder_cfg else -1,
             pooling=embedder_cfg.pooling if embedder_cfg else "mean",
+            n_threads=embedder_cfg.n_threads if embedder_cfg else None,
+            n_batch=embedder_cfg.n_batch if embedder_cfg else None,
+            tensor_split=embedder_cfg.tensor_split if embedder_cfg else None,
         ):
             raise HTTPException(
                 status_code=500,
@@ -189,6 +192,11 @@ def create_app() -> FastAPI:
                 n_ctx=generator_cfg.n_ctx if generator_cfg and generator_cfg.n_ctx else 2048,
                 n_gpu_layers=generator_cfg.n_gpu_layers if generator_cfg else -1,
                 parallel_slots=generator_cfg.parallel_slots if generator_cfg else 4,
+                n_threads=generator_cfg.n_threads if generator_cfg else None,
+                n_batch=generator_cfg.n_batch if generator_cfg else None,
+                flash_attn=generator_cfg.flash_attn if generator_cfg else False,
+                tensor_split=generator_cfg.tensor_split if generator_cfg else None,
+                no_kv_offload=generator_cfg.no_kv_offload if generator_cfg else False,
             ):
                 await server_manager.stop_embedding_server()
                 raise HTTPException(
@@ -316,7 +324,7 @@ def create_app() -> FastAPI:
                 if request.expected_response:
                     generation_span.set_attribute("custom.generation.ground_truth", request.expected_response)
 
-                # Latency measurements from llama.cpp
+                # Latency measurements from llama-server
                 ttft_ms = gen_result.prompt_ms + gen_result.predicted_per_token_ms
                 generation_span.set_attribute("custom.latency.ttft_ms", ttft_ms)
                 generation_span.set_attribute("custom.latency.llm_generation_latency_ms", gen_result.predicted_ms)
@@ -523,3 +531,34 @@ def create_app() -> FastAPI:
         )
 
     return app
+
+
+def main() -> None:
+    import argparse
+
+    import uvicorn
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
+    parser = argparse.ArgumentParser(description="RAGrig worker service")
+    parser.add_argument(
+        "--log-level", "-l",
+        default="info",
+        choices=["debug", "info", "warning", "error", "critical"],
+        help="Logging level (default: info)",
+    )
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
+    args = parser.parse_args()
+
+    os.environ["LOG_LEVEL"] = args.log_level.upper()
+    setup_logging()
+
+    uvicorn.run(
+        "worker.main:create_app",
+        factory=True,
+        host=args.host,
+        port=args.port,
+        log_level=args.log_level,
+    )

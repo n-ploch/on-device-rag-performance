@@ -102,11 +102,19 @@ export interface FatalErrorEvent {
   message: string;
 }
 
+export interface LoadingModelsEvent {
+  type: 'loading_models';
+  run_id: string;
+  config_index: number;
+  total_configs: number;
+}
+
 export interface DoneEvent {
   type: 'done';
 }
 
 export type RunEvent =
+  | LoadingModelsEvent
   | RunStartEvent
   | EntryResultEvent
   | EntryErrorEvent
