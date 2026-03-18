@@ -34,6 +34,30 @@ tools_required: [bash, http]
 compatible_with: [claude-code, cursor, copilot, codex]
 ---
 
+## Config file first — mandatory
+
+**Before doing anything else, verify that a config file exists and was created
+for this experiment.**
+
+1. If a `--config` argument was passed and the file exists → proceed to
+   [Pre-flight checklist](#pre-flight-checklist).
+2. If no argument was passed, check whether `config/config.yaml` or
+   `config/my_experiment.yaml` exists. If a plausible config file is present,
+   confirm with the user before using it.
+3. If **no config file exists** → stop and run the config creation flow:
+   - Tell the user: *"No config file found. Creating a config file is the
+     required first step. Let me guide you through it."*
+   - Follow **`skills/ragrig-config.md`** (or invoke `/ragrig-config`) to
+     create one interactively.
+   - Do **not** fall back to `config/sample_config.yaml` for real runs — the
+     sample is for reference only.
+
+The config file controls the dataset, models, quantization, chunking, and
+observability backends. All options are documented in
+[`docs/config.md`](../docs/config.md).
+
+---
+
 ## STOP and ask the user when
 
 - `GET /health` on the worker fails (connection refused or non-200)

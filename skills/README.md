@@ -25,14 +25,26 @@ Frontmatter fields:
 | `tools_required` | Tool capabilities needed (bash, http, read_file, …) |
 | `compatible_with` | Informational: which agent tools are known to work with this skill |
 
+## Standard workflow (follow in order)
+
+1. **Create a config file** — required before setup or evaluation
+2. **Set up the worker** — start, load models, build collection
+3. **Run evaluation** — pre-flight checks, execute, interpret
+4. **Analyze results** — export traces, explore metrics
+
 ## Available skills
 
-| File | Workflow |
-|------|---------|
-| [`ragrig-setup.md`](ragrig-setup.md) | Bootstrap venv, start worker, load GGUF models, build ChromaDB collection |
-| [`ragrig-evaluate.md`](ragrig-evaluate.md) | Pre-flight checks, run evaluation via CLI or HTTP API, interpret results |
-| [`ragrig-analyze.md`](ragrig-analyze.md) | Export Langfuse traces to Parquet, explore metrics in notebooks |
-| [`ragrig-troubleshoot.md`](ragrig-troubleshoot.md) | Diagnose failures, consult failure mode table, verify env vars |
+| Step | File | Workflow |
+|------|------|---------|
+| 1 | [`ragrig-config.md`](ragrig-config.md) | Interactively create a config YAML (required first step) |
+| 2 | [`ragrig-setup.md`](ragrig-setup.md) | Bootstrap venv, start worker, load GGUF models, build ChromaDB collection |
+| 3 | [`ragrig-evaluate.md`](ragrig-evaluate.md) | Pre-flight checks, run evaluation via CLI or HTTP API, interpret results |
+| 4 | [`ragrig-analyze.md`](ragrig-analyze.md) | Export Langfuse traces to Parquet, explore metrics in notebooks |
+| — | [`ragrig-troubleshoot.md`](ragrig-troubleshoot.md) | Diagnose failures, consult failure mode table, verify env vars |
+
+> **Config first.** `ragrig-setup` and `ragrig-evaluate` both require a config
+> file. If none exists, they will redirect to `ragrig-config` automatically.
+> The full config reference is in [`docs/config.md`](../docs/config.md).
 
 ## Tool adapters
 
