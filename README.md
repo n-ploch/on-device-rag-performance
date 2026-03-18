@@ -104,6 +104,15 @@ You should see a version string and the active backend listed (e.g., `ggml_metal
 
 ---
 
+## Agentic usage
+
+This benchmarking tool can also be used by agents! Review the `AGENTS.md` for further information and the `skills` folder for a deep understanding of the functionalities.
+
+A Claude Code (github, cursor as well) skill is available at `.claude/commands/ragrig.md`. Invoke it in
+Claude Code with `/ragrig` to start working with RAGrig!
+
+---
+
 ## Quick start
 
 ### 1. Bootstrap
@@ -239,10 +248,3 @@ See [.env.example](.env.example) for all variables with comments.
    before starting the worker.
 
 ---
-
-## Agentic usage
-
-A Claude Code skill is available at `.claude/commands/ragrig.md`. Invoke it in
-Claude Code with `/ragrig` to get a full machine-oriented reference for driving
-the tool end-to-end, including pre-flight checks, worker lifecycle, evaluation
-commands, and failure-mode guidance.
