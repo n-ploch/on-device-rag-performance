@@ -531,3 +531,31 @@ def create_app() -> FastAPI:
         )
 
     return app
+
+
+def main() -> None:
+    import argparse
+
+    import uvicorn
+
+    parser = argparse.ArgumentParser(description="RAGrig worker service")
+    parser.add_argument(
+        "--log-level", "-l",
+        default="info",
+        choices=["debug", "info", "warning", "error", "critical"],
+        help="Logging level (default: info)",
+    )
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
+    args = parser.parse_args()
+
+    os.environ["LOG_LEVEL"] = args.log_level.upper()
+    setup_logging()
+
+    uvicorn.run(
+        "worker.main:create_app",
+        factory=True,
+        host=args.host,
+        port=args.port,
+        log_level=args.log_level,
+    )
