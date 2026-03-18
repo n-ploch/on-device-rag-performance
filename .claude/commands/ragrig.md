@@ -26,7 +26,7 @@ When `/ragrig` is invoked **without** a specific sub-command, ask:
 
 > "Where are you in the RAGrig pipeline?
 >
-> 1. **Start from scratch** — I'll walk you through config → setup → evaluate
+> 1. **Start from scratch** — I'll walk you through setup → config → evaluate
 > 2. **I have a config already** — jump straight to setup or evaluate
 > 3. **Worker is running** — just run the evaluation
 > 4. **Something is broken** — troubleshoot a failure
