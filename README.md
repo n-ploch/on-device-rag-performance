@@ -192,15 +192,27 @@ on-device-rag-performance/
 
 ## Make targets
 
-| Target | Description |
-|--------|-------------|
-| `make setup` | Bootstrap venv and install all packages |
-| `make test` | Run unit tests |
-| `make worker` | Start worker (bare-metal) |
-| `make orchestrator` | Start orchestrator API only |
-| `make ui` | Start orchestrator API + Vite frontend |
-| `make eval CONFIG=...` | Run evaluation CLI with a config file |
-| `make clean` | Remove build artifacts |
+Make targets run with default arguments. To pass flags (e.g. `--log-level`), invoke the underlying scripts directly.
+
+| Target | Script | Description |
+|--------|--------|-------------|
+| `make setup` | `scripts/setup.sh` | Bootstrap venv and install all packages |
+| `make test` | — | Run unit tests |
+| `make worker` | `scripts/start-worker.sh` | Start worker (bare-metal, defaults: `--log-level info`) |
+| `make orchestrator` | — | Start orchestrator API only |
+| `make ui` | — | Start orchestrator API + Vite frontend |
+| `make eval CONFIG=...` | — | Run evaluation CLI with a config file |
+| `make clean` | — | Remove build artifacts |
+
+**Examples using scripts directly:**
+
+```bash
+# Worker with debug logging
+./scripts/start-worker.sh --log-level debug
+
+# Orchestrator with warning-level logging only
+rag-orchestrator --log-level warning
+```
 
 ---
 
