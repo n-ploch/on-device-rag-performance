@@ -565,9 +565,22 @@ async def get_status() -> StatusResponse:
 
 
 def main() -> None:
+    import argparse
+
     import uvicorn
 
-    uvicorn.run("orchestrator.api:app", host="127.0.0.1", port=8080, reload=False)
+    parser = argparse.ArgumentParser(description="RAGrig orchestrator API server")
+    parser.add_argument(
+        "--log-level",
+        "-l",
+        default="info",
+        choices=["debug", "info", "warning", "error", "critical"],
+        help="Logging level (default: info)",
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig(level=getattr(logging, args.log_level.upper()))
+    uvicorn.run("orchestrator.api:app", host="127.0.0.1", port=8080, reload=False, log_level=args.log_level)
 
 
 if __name__ == "__main__":
