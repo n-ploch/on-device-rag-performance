@@ -537,6 +537,9 @@ def main() -> None:
     import argparse
 
     import uvicorn
+    from dotenv import load_dotenv
+
+    load_dotenv()
 
     parser = argparse.ArgumentParser(description="RAGrig worker service")
     parser.add_argument(
