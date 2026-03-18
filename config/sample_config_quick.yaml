@@ -1,0 +1,46 @@
+# RAG Evaluation Configuration
+# See README.md for full documentation
+
+dataset:
+  id: &dataset_id "ragbench_emanual"
+  name: "ragbench"
+  limits:
+    corpus: null
+    ground_truth: null
+
+observability:
+  backends:
+    - type: "langfuse"
+      enabled: true
+  output_jsonl: "./logs/traces.jsonl"  # omit or set to null to disable local JSONL export
+  sys_logs_path: "./logs/runner.log"  # Path to write Python logs (null for no file logging, e.g., "./logs/runner.log")
+  print_logs: true  # Whether to print logs to terminal
+
+server:
+  # llama-server settings applied to both embedding and generation servers.
+  embedding_n_ctx: 512    # Context window for the embedding server (-c)
+  generation_n_ctx: 2048  # Context window for the generation server (-c)
+  n_gpu_layers: -1        # GPU layers to offload (-ngl); -1 = all layers (GPU), 0 = CPU-only
+  n_threads: null         # CPU threads (-t); null = llama-server default (uses all physical cores)
+  n_batch: null           # Logical batch size (-b); null = llama-server default (512)
+  flash_attn: false       # Flash attention (-fa); requires compatible GPU/Metal
+  tensor_split: null      # Multi-GPU tensor split (-ts); comma-separated fractions, e.g. "3,1"
+  no_kv_offload: false    # Disable KV cache GPU offload (-nkvo); helps Metal users with low unified memory
+
+run_configs:
+
+  - run_id: "e5_large_ministral_3_3B_q4_sample"
+    limit: 2  # optional: evaluate only the first N ground truth entries
+    retrieval:
+      dataset_id: *dataset_id
+      model: "ChristianAzinn/e5-large-v2-gguf"
+      quantization: "q4_k_m"
+      dimensions: 1024
+      chunking:
+        strategy: "fixed"
+        chunk_size: 500
+        chunk_overlap: 64
+      k: 6
+    generation:
+      model: "mistralai/Ministral-3-3B-Instruct-2512-GGUF"
+      quantization: "q4_k_m"
