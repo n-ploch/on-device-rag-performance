@@ -11,6 +11,8 @@ All results in this post were collected using **[RAGrig](https://github.com/n-pl
 - The **Orchestrator** drives the evaluation loop and optionally ships OTEL spans to an external tracing backend (a self-hosted [Langfuse](https://langfuse.com/) instance was used for tracing experiments and LLM-based evaluation)
 - The **Worker** runs quantized GGUF models via a `llama.cpp` server, making model deployment flexible.
 
+The Orchestrator + Worker architecture made it straightforward to run repeated configurations on edge hardware, while OTEL instrumentation ensured standardized trace capture. The pipeline is deliberately modular: swapping in a different retriever, adding a re-ranker, or extending to agentic retrieval requires only changes to the pipeline itself; the tracing and repeatability guarantees around it remain intact, backed by llama.cpp's portability and OTEL's ecosystem reach.
+
 ---
 
 ## Experimental Setup
@@ -248,10 +250,6 @@ Comparing low-recall (recall@6 < 0.4) and high-recall (recall@6 ≥ 0.8) claims 
 ### Verdict
 
 For on-device RAG where both answer quality and system load matter, **Mistral 7B Q4 on MPS provides the best quality per RAM-byte and the best generation latency with the highest adherence to context.** Ministral 3B Q8, being close in quality to its larger sibling, is the right pick when throughput is the priority and the 7B latencies are unacceptable. Both are above Llama 3.2 in RAG quality at comparable or lower system cost, especially when retrieval fails.
-
-### RAGrig
-
-This benchmark marks the first field test of RAGrig as versatile evaluation harness. The Orchestrator + Worker architecture made it straightforward to run repeated configurations on edge hardware, while OTEL instrumentation ensured standardized trace capture. The pipeline is deliberately modular: swapping in a different retriever, adding a re-ranker, or extending to agentic retrieval requires only changes to the pipeline itself; the tracing and repeatability guarantees around it remain intact, backed by llama.cpp's portability and OTEL's ecosystem reach.
 
 ### Limitations
 
