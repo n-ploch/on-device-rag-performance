@@ -1,258 +1,244 @@
-# WIP - Implementation ongoing
-# On-Device RAG Performance Evaluation
+# RAGrig — On-Device RAG Performance Evaluation
 
-A benchmarking system for evaluating hardware performance and generation quality of quantized Mistral models for on-device Retrieval-Augmented Generation (RAG).
+A benchmarking system for evaluating hardware performance and generation quality
+of quantized LLMs for on-device Retrieval-Augmented Generation (RAG).
 
-## Project Goal
+## What it measures
 
-This project measures how different quantization levels of LLMs affect:
 - **Hardware metrics**: RAM usage, CPU utilization, swap activity, thermal behavior
 - **Inference metrics**: End-to-end latency, time-to-first-token, tokens/second
 - **Quality metrics**: Retrieval recall/precision, MRR, abstention rates
 
-The system is designed for edge device evaluation where models run entirely offline.
-
-## Architecture Overview
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           HOST MACHINE                                   │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                        ORCHESTRATOR                                │  │
-│  │  • Drives evaluation loop                                         │  │
-│  │  • Calculates quality metrics (recall@k, precision@k, MRR)        │  │
-│  │  • Exports traces via OpenTelemetry (JSONL / Langfuse)            │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-│                                  │                                       │
-│                                  │ HTTP (POST /generate)                 │
-│                                  ▼                                       │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                      HOST MACHINE                         │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │                   ORCHESTRATOR                      │  │
+│  │  • Drives evaluation loop                          │  │
+│  │  • Computes quality metrics (recall@k, MRR, …)    │  │
+│  │  • Exports traces via OpenTelemetry → Langfuse     │  │
+│  └────────────────────────────────────────────────────┘  │
+│                          │                                │
+│                          │ HTTP POST /generate            │
+│                          ▼                                │
+└──────────────────────────────────────────────────────────┘
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           EDGE DEVICE                                    │
-│  ┌───────────────────────────────────────────────────────────────────┐  │
-│  │                          WORKER                                    │  │
-│  │  • FastAPI server (100% offline operation)                        │  │
-│  │  • llama-cpp-python for embeddings & generation                   │  │
-│  │  • ChromaDB for vector retrieval                                  │  │
-│  │  • psutil for hardware monitoring                                 │  │
-│  └───────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                      EDGE DEVICE                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │                    WORKER                           │  │
+│  │  • FastAPI (100% offline operation)                │  │
+│  │  • llama-server for embeddings & generation        │  │
+│  │  • ChromaDB for vector retrieval                   │  │
+│  │  • psutil for hardware monitoring                  │  │
+│  └────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
 ```
-
-### Strict Decoupling
-
-The system enforces a clear separation of concerns:
 
 | Component | Responsibility | Does NOT do |
 |-----------|---------------|-------------|
-| **Orchestrator** | Evaluation loop, quality metrics, telemetry export | Model inference, hardware monitoring |
+| **Orchestrator** | Evaluation loop, quality metrics, telemetry | Model inference, hardware monitoring |
 | **Worker** | Model loading, inference, retrieval, hardware metrics | Quality scoring, trace aggregation |
 | **Shared** | Pydantic schemas for API contracts | Business logic |
 
-### Network Isolation
+The edge worker runs **100% offline**. Models, datasets, and ChromaDB
+collections must be pre-provisioned to local paths before starting, which is normally performed by the orchestrator.
 
-The Edge Worker operates **100% offline**. No models or datasets are downloaded at runtime—all artifacts must be pre-provisioned to local paths.
+---
 
-## Repository Structure
+## Prerequisites: llama.cpp
+
+The worker relies on `llama-server` (part of llama.cpp) for model inference and embeddings. Install it on the **edge device** before proceeding. Follow [here](https://github.com/ggml-org/llama.cpp?tab=readme-ov-file#quick-start) for the official installation guide.
+
+### Option A — Package manager (simplest)
+
+```bash
+# macOS / Linux
+brew install llama.cpp
+
+# Windows
+winget install llama.cpp
+```
+
+> **GPU backend check**: Package manager builds may not enable your GPU backend by default. After installing, run `llama-server --version` and check that the correct backend appears (e.g., `Metal`, `CUDA`, `Vulkan`). If it shows `CPU only`, build from source instead.
+
+### Option B — Pre-built binaries
+
+Download the latest release for your platform from [github.com/ggml-org/llama.cpp/releases](https://github.com/ggml-org/llama.cpp/releases). Each release includes backend-specific builds:
+
+| Build suffix | Hardware |
+|---|---|
+| `*-metal` | Apple Silicon (M-series) |
+| `*-cuda-cu12*` | NVIDIA GPU (CUDA 12.x) |
+| `*-vulkan` | AMD / Intel GPU (cross-platform) |
+| `*-hip` | AMD GPU (ROCm) |
+
+Pick the build matching your device and add the binary directory to `PATH`.
+
+### Option C — Build from source (recommended for hardware-specific tuning)
+
+Building from source lets the compiler optimize for your exact CPU/GPU and is the best way to unlock peak performance. See the [llama.cpp build docs](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md) for full instructions. Quick reference:
+
+```bash
+git clone https://github.com/ggml-org/llama.cpp
+cd llama.cpp
+cmake -B build \
+  -DGGML_METAL=ON       # Apple Silicon — replace with the flag for your backend
+  # -DGGML_CUDA=ON      # NVIDIA
+  # -DGGML_VULKAN=ON    # AMD / Intel via Vulkan
+  # -DGGML_HIP=ON       # AMD via ROCm
+cmake --build build --config Release -j $(nproc)
+```
+
+After building, add `build/bin/` to your `PATH` or copy `llama-server` to a location already on it.
+
+### Verify the installation
+
+```bash
+llama-server --version
+```
+
+You should see a version string and the active backend listed (e.g., `ggml_metal`, `ggml_cuda`). If `llama-server` is not found, check your `PATH`.
+
+---
+
+## Quick start
+
+### 1. Bootstrap
+
+```bash
+./scripts/setup.sh
+```
+
+This creates a `.rag/` venv, installs all packages in editable mode, and copies
+`.env.example → .env`. Edit `.env` with your local paths and backend tracing variables (i.e., Langfuse).
+
+### 2. Run tests
+
+```bash
+make test
+```
+
+### 3a. Local development (separate terminals)
+
+**Terminal 1 — Worker (edge device)**
+
+```bash
+./scripts/start-worker.sh
+```
+
+**Terminal 2 — Orchestrator + Frontend (host)**
+
+```bash
+make ui       # orchestrator API on :8080, Vite frontend on :5173
+# or CLI:
+make eval CONFIG=config/sample_config.yaml
+```
+
+### 3b. Docker (orchestrator + frontend only)
+
+```bash
+./scripts/start-docker.sh
+```
+
+Starts the orchestrator API on `localhost:8080` and the frontend on
+`localhost:3003`. The worker still runs bare-metal on the edge device.
+
+---
+
+## Repository structure
 
 ```
 on-device-rag-performance/
 ├── orchestrator/           # Host-side evaluation driver
 │   └── src/orchestrator/
+│       ├── api.py          # FastAPI server (rag-api entry point)
+│       ├── runner.py       # CLI entry point (rag-orchestrator)
 │       ├── exporters/      # JSONL and Langfuse span exporters
-│       ├── models/         # Model registry (path resolution)
 │       └── metrics.py      # recall@k, precision@k, MRR, abstention
 │
 ├── worker/                 # Edge device FastAPI service
 │   └── src/worker/
-│       ├── models/
-│       │   ├── embedder.py    # Llama wrapper with embedding=True
-│       │   ├── generator.py   # Llama wrapper for text generation
-│       │   └── registry.py    # GGUF path resolution
-│       ├── services/
-│       │   ├── chromadb_bridge.py    # EmbeddingFunction adapter
-│       │   ├── collection_registry.py # Collection metadata management
-│       │   ├── generation.py         # RAG prompt building + inference
-│       │   ├── hardware_monitor.py   # Async psutil sampling
-│       │   └── retrieval.py          # ChromaDB query execution
-│       └── main.py         # FastAPI app with lifespan model loading
+│       ├── main.py         # Factory app + endpoints
+│       ├── models/         # Embedder, generator, registry
+│       └── services/       # Retrieval, generation, hardware monitor
 │
 ├── shared/                 # Shared Pydantic schemas
-│   └── src/shared_types/
-│       ├── schemas.py      # GenerateRequest, GenerateResponse, etc.
-│       └── naming.py       # Collection/model naming conventions
+│   └── src/shared_types/schemas.py
 │
-├── tests/
-│   ├── unit/               # Unit tests per component
-│   └── integration/        # API contract tests
-│
-└── config/                 # YAML configuration files
+├── analysis/               # Langfuse metrics export + notebooks
+├── frontend/               # Browser UI (Vite + TypeScript)
+├── tests/                  # Unit and integration tests
+├── config/                 # YAML evaluation configs
+├── scripts/                # Setup and startup scripts
+├── docs/                   # API and CLI reference
+└── .claude/commands/       # Claude Code skills (ragrig.md)
 ```
 
-## Mental Models
+---
 
-### 1. Model Loading & Lifespan
+## Documentation
 
-llama.cpp locks memory upon model instantiation. The Worker creates **two separate wrappers** during FastAPI's lifespan:
+| Doc | Description |
+|-----|-------------|
+| [docs/cli.md](docs/cli.md) | `rag-orchestrator` and `rag-api` CLI reference |
+| [docs/worker-api.md](docs/worker-api.md) | Worker FastAPI endpoint reference |
+| [docs/orchestrator-api.md](docs/orchestrator-api.md) | Orchestrator FastAPI endpoint reference |
+| [config/sample_config.yaml](config/sample_config.yaml) | Annotated example evaluation config |
 
-```python
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Embedder: small context, embedding mode
-    app.state.embedder = Embedder(path, n_ctx=512, embedding=True)
+---
 
-    # Generator: large context for RAG
-    app.state.generator = Generator(path, n_ctx=2048)
+## Make targets
 
-    yield  # App runs here
+| Target | Description |
+|--------|-------------|
+| `make setup` | Bootstrap venv and install all packages |
+| `make test` | Run unit tests |
+| `make worker` | Start worker (bare-metal) |
+| `make orchestrator` | Start orchestrator API only |
+| `make ui` | Start orchestrator API + Vite frontend |
+| `make eval CONFIG=...` | Run evaluation CLI with a config file |
+| `make clean` | Remove build artifacts |
 
-    # Cleanup on shutdown
-```
+---
 
-### 2. ChromaDB Integration
-
-ChromaDB requires an `EmbeddingFunction` to generate vectors. We bridge our local Embedder:
-
-```python
-class LlamaEmbeddingFunction(EmbeddingFunction[Documents]):
-    def __init__(self, embedder: Embedder):
-        self._embedder = embedder
-
-    def __call__(self, input: Documents) -> Embeddings:
-        return [self._embedder.embed(doc) for doc in input]
-```
-
-### 3. Collection Storage Convention
-
-Collection folders are named dynamically to prevent model/dimension mismatches:
-
-```
-{model}__{quantization}__{dimensions}_{index}
-
-Example: mistral-embed__q4_k_m__1024_0
-```
-
-Each collection is fully self-contained in its own folder:
-
-- `<collections_root>/metadata.json`: top-level tree index
-- `<collections_root>/<collection_folder>/metadata.json`: leaf metadata
-- `<collections_root>/<collection_folder>/chroma.sqlite3`: Chroma sqlite
-- `<collections_root>/<collection_folder>/<segment-uuid>/...bin`: Chroma segment files
-
-Inside each collection folder, the internal Chroma collection name is fixed to `chunks`.
-
-### 4. Hardware Monitoring
-
-An async context manager samples hardware metrics during inference:
-
-```python
-async with HardwareMonitor() as monitor:
-    result = generation_service.generate(prompt, chunks)
-
-# monitor.metrics contains:
-#   max_ram_usage_mb, avg_cpu_utilization_pct,
-#   peak_cpu_temp_c, swap_in_bytes, swap_out_bytes
-```
-
-## Interface Definitions
-
-### API Contract: `POST /generate`
-
-**Request** (`GenerateRequest`):
-```json
-{
-  "claim_id": "c1",
-  "input_prompt": "Is aspirin effective for pain relief?",
-  "run_config": {
-    "run_id": "mistral_q4_k5_001",
-    "retrieval": {
-      "model": "intfloat/multilingual-e5-small",
-      "quantization": "fp16",
-      "dimensions": 384,
-      "chunking": {"strategy": "fixed", "chunk_size": 500, "chunk_overlap": 64},
-      "k": 5
-    },
-    "generation": {
-      "model": "TheBloke/Mistral-7B-Instruct-v0.1-GGUF",
-      "quantization": "q4_k_m"
-    }
-  }
-}
-```
-
-**Response** (`GenerateResponse`):
-```json
-{
-  "output": "Based on the provided context, aspirin is effective...",
-  "retrieval_data": {
-    "cited_doc_ids": ["doc_123", "doc_456"],
-    "retrieved_chunks": ["Aspirin reduces inflammation...", "Clinical trials show..."]
-  },
-  "inference_measurement": {
-    "e2e_latency_ms": 1250.5,
-    "retrieval_latency_ms": 45.2,
-    "ttft_ms": 120.0,
-    "llm_generation_latency_ms": 1100.3,
-    "prompt_tokens": 512,
-    "completion_tokens": 128,
-    "tokens_per_second": 11.6
-  },
-  "hardware_measurement": {
-    "max_ram_usage_mb": 4500.2,
-    "avg_cpu_utilization_pct": 85.5,
-    "peak_cpu_temp_c": 72.0,
-    "swap_in_bytes": 0,
-    "swap_out_bytes": 0
-  }
-}
-```
-
-### Shared Types
-
-All API contracts are defined as Pydantic models in `shared/src/shared_types/schemas.py`. Both orchestrator and worker import these via editable install:
-
-```bash
-pip install -e ./shared
-```
-
-This ensures type safety and prevents schema drift between components.
-
-## Environment Variables
+## Environment variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `LOCAL_MODELS_DIR` | Yes | Path to pre-downloaded GGUF models |
-| `LOCAL_COLLECTIONS_DIR` | Yes | Path to pre-built ChromaDB collections |
-| `EMBEDDER_MODEL_REPO` | No | Embedding model name (default: `mistral-embed`) |
-| `EMBEDDER_QUANTIZATION` | No | Embedding quantization (default: `q4_k_m`) |
-| `GENERATOR_MODEL_REPO` | No | Generation model name (default: `mistral-7b-instruct`) |
-| `GENERATOR_QUANTIZATION` | No | Generation quantization (default: `q4_k_m`) |
-| `WORKER_URL` | No | Worker API URL for orchestrator (default: `http://localhost:8000`) |
+| `LOCAL_COLLECTIONS_DIR` | Yes | Path to ChromaDB collections |
+| `LOCAL_DATASETS_DIR` | Yes | Path to downloaded datasets |
+| `WORKER_URL` | No | Worker URL (default: `http://localhost:8000`) |
+| `LANGFUSE_BASE_URL` | If using Langfuse | Langfuse instance URL |
+| `LANGFUSE_PUBLIC_KEY` | If using Langfuse | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | If using Langfuse | Langfuse secret key |
+| `HF_TOKEN` | If gated dataset | HuggingFace access token |
+| `LLM_API_KEY` | If remote generation | Remote LLM API key |
+| `LOG_LEVEL` | No | Logging level (default: `INFO`) |
 
-## Getting Started
+See [.env.example](.env.example) for all variables with comments.
 
-```bash
-# Create virtual environment
-python -m venv .rag
-source .rag/bin/activate
+---
 
-# Install dependencies
-pip install -r requirements.txt
+## Key constraints
 
-# Install packages in editable mode
-pip install -e ./shared -e ./worker -e ./orchestrator
+1. **`embedding=True`**: The embedder must be started with embedding mode or
+   llama.cpp will crash.
+2. **Vector dimensions**: ChromaDB locks dimensions per collection — ensure
+   `retrieval.dimensions` in the config matches the model's actual output.
+3. **Editable installs**: `pip install -e ./shared` shares Pydantic models
+   without duplication. `./scripts/setup.sh` handles this automatically.
+4. **No runtime downloads**: All models and collections must exist locally
+   before starting the worker.
 
-# Run tests
-pytest tests/ -v
+---
 
-# Start worker (on edge device)
-uvicorn worker.main:create_app --factory --host 0.0.0.0 --port 8000
-```
+## Agentic usage
 
-## Key Constraints
-
-1. **`embedding=True` flag**: The Embedder MUST be instantiated with `embedding=True` or llama.cpp will crash
-2. **Vector dimensions**: ChromaDB locks dimensions per collection—ensure collection names include the dimension value
-3. **Editable installs**: Use `pip install -e ./shared` to share Pydantic models without duplication
-4. **No runtime downloads**: All models and collections must exist locally before starting the worker
+A Claude Code skill is available at `.claude/commands/ragrig.md`. Invoke it in
+Claude Code with `/ragrig` to get a full machine-oriented reference for driving
+the tool end-to-end, including pre-flight checks, worker lifecycle, evaluation
+commands, and failure-mode guidance.
