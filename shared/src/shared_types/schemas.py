@@ -189,6 +189,11 @@ class ServerConfig(BaseModel):
     n_gpu_layers: int = -1  # GPU layers to offload (-1 = all)
     parallel_slots: int = 1  # Parallel request slots (generation only)
     pooling: str = "mean"  # Pooling strategy (embedding only): mean, cls, last
+    n_threads: int | None = None  # CPU threads (-t); None = llama-server default
+    n_batch: int | None = None  # Logical batch size (-b); None = llama-server default
+    flash_attn: bool = False  # Enable flash attention (-fa)
+    tensor_split: str | None = None  # GPU tensor split (-ts); comma-separated fractions for multi-GPU
+    no_kv_offload: bool = False  # Disable KV cache GPU offload (-nkvo); useful for Metal with low RAM
 
 
 class LoadModelsRequest(BaseModel):

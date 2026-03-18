@@ -36,9 +36,13 @@ class ServerConfig:
     embedding: bool = False
     pooling: str = "mean"  # mean, cls, last
     parallel_slots: int = 1
-    continuous_batching: bool = True
     metrics: bool = True
     host: str = "127.0.0.1"
+    n_threads: int | None = None  # CPU threads (-t); None = llama-server default
+    n_batch: int | None = None  # Logical batch size (-b); None = llama-server default
+    flash_attn: bool = False  # Enable flash attention (-fa)
+    tensor_split: str | None = None  # GPU tensor split (-ts); comma-separated fractions for multi-GPU
+    no_kv_offload: bool = False  # Disable KV cache GPU offload (-nkvo); useful for Metal with low RAM
 
 
 @dataclass
@@ -131,18 +135,31 @@ class LlamaServerManager:
             "-ngl", str(config.n_gpu_layers),
         ]
 
+        if config.n_threads is not None:
+            cmd.extend(["-t", str(config.n_threads)])
+
+        if config.n_batch is not None:
+            cmd.extend(["-b", str(config.n_batch)])
+
         if config.embedding:
             cmd.append("--embedding")
             cmd.extend(["--pooling", config.pooling])
 
         if config.parallel_slots > 1:
             cmd.extend(["-np", str(config.parallel_slots)])
-
-        if config.continuous_batching:
-            cmd.append("-cb")
+            cmd.append("-cb")  # continuous batching is only meaningful with multiple slots
 
         if config.metrics:
             cmd.append("--metrics")
+
+        if config.flash_attn:
+            cmd.append("-fa")
+
+        if config.tensor_split and "," in config.tensor_split:
+            cmd.extend(["-ts", config.tensor_split])
+
+        if config.no_kv_offload:
+            cmd.append("-nkvo")
 
         return cmd
 
@@ -185,6 +202,9 @@ class LlamaServerManager:
         n_ctx: int = 512,
         n_gpu_layers: int = -1,
         pooling: str = "mean",
+        n_threads: int | None = None,
+        n_batch: int | None = None,
+        tensor_split: str | None = None,
     ) -> bool:
         """Start the embedding server.
 
@@ -193,6 +213,9 @@ class LlamaServerManager:
             n_ctx: Context size (default 512 for embeddings).
             n_gpu_layers: GPU layers to offload (-1 = all).
             pooling: Pooling strategy (mean, cls, last).
+            n_threads: CPU threads (-t); None = llama-server default.
+            n_batch: Logical batch size (-b); None = llama-server default.
+            tensor_split: GPU tensor split fractions for multi-GPU (-ts).
 
         Returns:
             True if server started successfully, False otherwise.
@@ -209,9 +232,14 @@ class LlamaServerManager:
             n_gpu_layers=n_gpu_layers,
             embedding=True,
             pooling=pooling,
-            parallel_slots=1,  # Embeddings typically don't need parallel slots
-            continuous_batching=True,
+            parallel_slots=1,
             metrics=True,
+            n_threads=n_threads,
+            n_batch=n_batch,
+            # flash_attn and no_kv_offload are not forwarded: encoder-only embedding
+            # models (e.g. E5/BERT) don't use causal attention or a KV cache, so
+            # -fa may cause a startup failure and -nkvo is a no-op.
+            tensor_split=tensor_split,
         )
 
         cmd = self._build_command(config)
@@ -251,6 +279,11 @@ class LlamaServerManager:
         n_ctx: int = 2048,
         n_gpu_layers: int = -1,
         parallel_slots: int = 4,
+        n_threads: int | None = None,
+        n_batch: int | None = None,
+        flash_attn: bool = False,
+        tensor_split: str | None = None,
+        no_kv_offload: bool = False,
     ) -> bool:
         """Start the generation server.
 
@@ -259,6 +292,11 @@ class LlamaServerManager:
             n_ctx: Context size (default 2048 for RAG).
             n_gpu_layers: GPU layers to offload (-1 = all).
             parallel_slots: Number of parallel request slots.
+            n_threads: CPU threads (-t); None = llama-server default.
+            n_batch: Logical batch size (-b); None = llama-server default.
+            flash_attn: Enable flash attention (-fa).
+            tensor_split: GPU tensor split fractions for multi-GPU (-ts).
+            no_kv_offload: Disable KV cache GPU offload (-nkvo).
 
         Returns:
             True if server started successfully, False otherwise.
@@ -275,8 +313,12 @@ class LlamaServerManager:
             n_gpu_layers=n_gpu_layers,
             embedding=False,
             parallel_slots=parallel_slots,
-            continuous_batching=True,
             metrics=True,
+            n_threads=n_threads,
+            n_batch=n_batch,
+            flash_attn=flash_attn,
+            tensor_split=tensor_split,
+            no_kv_offload=no_kv_offload,
         )
 
         cmd = self._build_command(config)

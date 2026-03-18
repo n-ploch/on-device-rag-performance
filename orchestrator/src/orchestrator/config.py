@@ -56,6 +56,24 @@ class ObservabilityConfig(BaseModel):
     print_logs: bool = True  # Whether to print logs to terminal
 
 
+class ServerSettings(BaseModel):
+    """llama-server settings exposed in config.yaml.
+
+    Shared hardware/performance flags are applied to both the embedding and
+    generation servers. Context sizes are configured per server type because
+    they have meaningfully different optimal values.
+    """
+
+    embedding_n_ctx: int = 512    # Context window for the embedding server (-c)
+    generation_n_ctx: int = 2048  # Context window for the generation server (-c)
+    n_gpu_layers: int = -1        # GPU layers to offload (-ngl); -1 = all, 0 = CPU-only
+    n_threads: int | None = None  # CPU threads (-t); None = llama-server default
+    n_batch: int | None = None    # Logical batch size (-b); None = llama-server default (512)
+    flash_attn: bool = False      # Flash attention (-fa); requires compatible GPU/Metal
+    tensor_split: str | None = None   # Multi-GPU split (-ts); comma-separated fractions, e.g. "3,1"
+    no_kv_offload: bool = False   # Disable KV cache GPU offload (-nkvo); helps Metal with low RAM
+
+
 class EvalConfig(BaseModel):
     """Complete evaluation configuration.
 
@@ -65,6 +83,7 @@ class EvalConfig(BaseModel):
     dataset: DatasetConfig
     observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
     run_configs: list[RunConfig]
+    server: ServerSettings = Field(default_factory=ServerSettings)  # llama-server hardware/perf settings shared across all runs
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> "EvalConfig":

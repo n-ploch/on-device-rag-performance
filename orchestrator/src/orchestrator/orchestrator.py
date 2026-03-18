@@ -287,18 +287,31 @@ class Orchestrator:
         if not self._client:
             raise RuntimeError("Orchestrator must be used as async context manager")
 
+        srv = self.config.server
         request = LoadModelsRequest(
             embedder_repo=run_config.retrieval.model,
             embedder_quantization=run_config.retrieval.quantization,
             generator_repo=run_config.generation.model,
             generator_quantization=run_config.generation.quantization,
             embedder_config=ServerConfig(
-                n_ctx=512,
-                parallel_slots=1
+                n_ctx=srv.embedding_n_ctx,
+                parallel_slots=1,
+                n_gpu_layers=srv.n_gpu_layers,
+                n_threads=srv.n_threads,
+                n_batch=srv.n_batch,
+                flash_attn=srv.flash_attn,
+                tensor_split=srv.tensor_split,
+                no_kv_offload=srv.no_kv_offload,
             ),
             generator_config=ServerConfig(
-                n_ctx=2048,
-                parallel_slots=1
+                n_ctx=srv.generation_n_ctx,
+                parallel_slots=1,
+                n_gpu_layers=srv.n_gpu_layers,
+                n_threads=srv.n_threads,
+                n_batch=srv.n_batch,
+                flash_attn=srv.flash_attn,
+                tensor_split=srv.tensor_split,
+                no_kv_offload=srv.no_kv_offload,
             ),
             generation_config=run_config.generation,
         )

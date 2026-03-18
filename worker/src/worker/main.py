@@ -139,6 +139,9 @@ def create_app() -> FastAPI:
             n_ctx=embedder_cfg.n_ctx if embedder_cfg and embedder_cfg.n_ctx else 512,
             n_gpu_layers=embedder_cfg.n_gpu_layers if embedder_cfg else -1,
             pooling=embedder_cfg.pooling if embedder_cfg else "mean",
+            n_threads=embedder_cfg.n_threads if embedder_cfg else None,
+            n_batch=embedder_cfg.n_batch if embedder_cfg else None,
+            tensor_split=embedder_cfg.tensor_split if embedder_cfg else None,
         ):
             raise HTTPException(
                 status_code=500,
@@ -189,6 +192,11 @@ def create_app() -> FastAPI:
                 n_ctx=generator_cfg.n_ctx if generator_cfg and generator_cfg.n_ctx else 2048,
                 n_gpu_layers=generator_cfg.n_gpu_layers if generator_cfg else -1,
                 parallel_slots=generator_cfg.parallel_slots if generator_cfg else 4,
+                n_threads=generator_cfg.n_threads if generator_cfg else None,
+                n_batch=generator_cfg.n_batch if generator_cfg else None,
+                flash_attn=generator_cfg.flash_attn if generator_cfg else False,
+                tensor_split=generator_cfg.tensor_split if generator_cfg else None,
+                no_kv_offload=generator_cfg.no_kv_offload if generator_cfg else False,
             ):
                 await server_manager.stop_embedding_server()
                 raise HTTPException(
