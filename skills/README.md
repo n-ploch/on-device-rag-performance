@@ -27,8 +27,9 @@ Frontmatter fields:
 
 ## Standard workflow (follow in order)
 
-1. **Create a config file** — required before setup or evaluation
-2. **Set up the worker** — start venv and start worker
+0. **Set up ragrig** - if first-time setup, set up ragrig with the setup script
+1. **Set up the worker** — start venv and start worker
+2. **Create a config file** — required before setup or evaluation
 3. **Run evaluation** — pre-flight checks, execute, interpret
 4. **Analyze results** — export traces, explore metrics
 
@@ -42,7 +43,7 @@ Frontmatter fields:
 | 4 | [`ragrig-analyze.md`](ragrig-analyze.md) | Export Langfuse traces to Parquet, explore metrics in notebooks |
 | — | [`ragrig-troubleshoot.md`](ragrig-troubleshoot.md) | Diagnose failures, consult failure mode table, verify env vars |
 
-> **Config first.** `ragrig-evaluate` requires a config
+> **Config first.** `ragrig-evaluate` requires a config and a healthy worker
 > file. If none exists, they will redirect to `ragrig-config` automatically.
 > The full config reference is in [`docs/config.md`](../docs/config.md).
 
