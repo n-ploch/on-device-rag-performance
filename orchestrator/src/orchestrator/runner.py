@@ -442,7 +442,7 @@ async def _run(
             validation = orchestrator.validate_dataset()
             entries = load_ground_truth(validation.ground_truth_path)
             logger.info(
-                "Dry run complete. Would evaluate %d entries x %d configs",
+                "Dry run complete. %d configs present.",
                 len(entries),
                 len(run_configs),
             )
