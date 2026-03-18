@@ -1,7 +1,8 @@
 # AGENTS.md — RAGrig
 
 > Machine-readable context for AI coding agents (Codex, Cursor, Gemini CLI, Copilot, etc.).
-> Claude Code users: see `.claude/commands/ragrig.md` for the evaluation skill (`/ragrig`).
+> Agent skills (setup, evaluate, analyze, troubleshoot) are in `skills/` — see [`skills/README.md`](skills/README.md).
+> Claude Code users: invoke `/ragrig`, `/ragrig-setup`, `/ragrig-evaluate`, `/ragrig-analyze`, or `/ragrig-troubleshoot`.
 
 ---
 
