@@ -118,33 +118,48 @@ This creates a `.rag/` venv, installs all packages in editable mode, and copies
 ### 2. Run tests
 
 ```bash
-make test
+source .rag/bin/activate
+pytest tests/unit -v
 ```
 
-### 3a. Local development (separate terminals)
-
-**Terminal 1 — Worker (edge device)**
+### 3. Start the worker (edge device)
 
 ```bash
-./scripts/start-worker.sh
+./scripts/start-worker.sh              # default log level: info
 ```
+or
+```bash
+./scripts/start-worker.sh --log-level debug
+```
+The `--log-level` flag can be used for all scripts.
 
-**Terminal 2 — Orchestrator + Frontend (host)**
+### 4. Use the orchestrator via CLI:
+
+In a new terminal, run:
 
 ```bash
-make ui       # orchestrator API on :8080, Vite frontend on :5173
-# or CLI:
-make eval CONFIG=config/sample_config.yaml
+source .rag/bin/activate
+rag-orchestrator --config config/sample_config_quick.yaml
 ```
 
-### 3b. Docker (orchestrator + frontend only)
+This loads the [sample_config_quick.yaml](config/sample_config_quick.yaml), which is a small configuration for demonstrative purposes. Create your own [configs](docs/config.md)!
+
+### 5. Use the orchestrator via UI:
+
+**Development** — orchestrator API + Vite dev server (hot reload). In a new terminal, run:
 
 ```bash
-./scripts/start-docker.sh
+./scripts/start-ui.sh                  # API on :8080, frontend on :5173, --log-level debug
 ```
 
-Starts the orchestrator API on `localhost:8080` and the frontend on
-`localhost:3003`. The worker still runs bare-metal on the edge device.
+**Production** — orchestrator API + frontend via Docker Compose:
+
+```bash
+docker compose up --build              # foreground
+docker compose up --build -d           # background (detached)
+```
+
+Orchestrator API on `localhost:8080`, frontend on `localhost:3003`. The worker always runs bare-metal on the edge device for optimal performance and native GPU support.
 
 ---
 
@@ -156,8 +171,8 @@ on-device-rag-performance/
 │   └── src/orchestrator/
 │       ├── api.py          # FastAPI server (rag-api entry point)
 │       ├── runner.py       # CLI entry point (rag-orchestrator)
-│       ├── exporters/      # JSONL and Langfuse span exporters
-│       └── metrics.py      # recall@k, precision@k, MRR, abstention
+│       ├── exporters/      # JSONL span exporter
+│       └── metrics.py      # recall@k, precision@k, MRR
 │
 ├── worker/                 # Edge device FastAPI service
 │   └── src/worker/
@@ -174,7 +189,10 @@ on-device-rag-performance/
 ├── config/                 # YAML evaluation configs
 ├── scripts/                # Setup and startup scripts
 ├── docs/                   # API and CLI reference
-└── .claude/commands/       # Claude Code skills (ragrig.md)
+├── skills/                 # Generic skill description for any agentic tool
+├── .claude/commands/       # Claude Code skills (ragrig.md)
+├── .cursor/rules/          # Cursor agent rules
+└── .github/                # Copilot instructions + CI workflows
 ```
 
 ---
@@ -187,32 +205,6 @@ on-device-rag-performance/
 | [docs/worker-api.md](docs/worker-api.md) | Worker FastAPI endpoint reference |
 | [docs/orchestrator-api.md](docs/orchestrator-api.md) | Orchestrator FastAPI endpoint reference |
 | [config/sample_config.yaml](config/sample_config.yaml) | Annotated example evaluation config |
-
----
-
-## Make targets
-
-Make targets run with default arguments. To pass flags (e.g. `--log-level`), invoke the underlying scripts directly.
-
-| Target | Script | Description |
-|--------|--------|-------------|
-| `make setup` | `scripts/setup.sh` | Bootstrap venv and install all packages |
-| `make test` | — | Run unit tests |
-| `make worker` | `scripts/start-worker.sh` | Start worker (bare-metal, defaults: `--log-level info`) |
-| `make orchestrator` | — | Start orchestrator API only |
-| `make ui` | — | Start orchestrator API + Vite frontend |
-| `make eval CONFIG=...` | — | Run evaluation CLI with a config file |
-| `make clean` | — | Remove build artifacts |
-
-**Examples using scripts directly:**
-
-```bash
-# Worker with debug logging
-./scripts/start-worker.sh --log-level debug
-
-# Orchestrator with warning-level logging only
-rag-orchestrator --log-level warning
-```
 
 ---
 
