@@ -27,8 +27,6 @@ arguments:
     default: "false"
 prerequisites:
   - "Worker running and healthy (GET /health returns 200)"
-  - "Models loaded in worker (POST /load_models completed)"
-  - "ChromaDB collection populated (POST /collection/status returns populated: true)"
   - ".env configured with observability backend credentials if enabled"
 tools_required: [bash, http]
 compatible_with: [claude-code, cursor, copilot, codex]
@@ -154,6 +152,5 @@ SSE events: `run_start` → `entry_result` (one per entry) → `run_complete` �
 | `recall_at_k` | > 0.7 | Fraction of relevant docs retrieved in top-k |
 | `precision_at_k` | > 0.5 | Fraction of retrieved docs that are relevant |
 | `mrr` | > 0.6 | Mean reciprocal rank of first relevant doc |
-| `abstention` | low | Model declined to answer (signals retrieval failure) |
 | `ttft_ms` | < 500 ms | Time to first token |
 | `tokens_per_second` | device-dependent | Generation throughput |
