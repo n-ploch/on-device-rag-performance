@@ -4,6 +4,11 @@
 !.claude/commands/
 !.claude/commands/*
 .claude/settings.local.json
+!.cursor/
+!.cursor/rules/
+!.cursor/rules/*
+!.github/
+!.github/**
 local/
 logs/
 
