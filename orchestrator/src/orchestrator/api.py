@@ -580,7 +580,7 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper()))
-    uvicorn.run("orchestrator.api:app", host="127.0.0.1", port=8080, reload=False, log_level=args.log_level)
+    uvicorn.run("orchestrator.api:app", host="0.0.0.0", port=8080, reload=False, log_level=args.log_level)
 
 
 if __name__ == "__main__":
