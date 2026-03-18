@@ -23,8 +23,6 @@ jobs:
           cache: pip
 
       - name: Install packages
-        # Install worker WITHOUT the optional llama-cpp-python dep (requires GPU build toolchain).
-        # Unit tests mock the Llama class so they pass without it.
         run: |
           pip install --upgrade pip
           pip install -e ./shared

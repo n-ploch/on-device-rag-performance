@@ -324,7 +324,7 @@ def create_app() -> FastAPI:
                 if request.expected_response:
                     generation_span.set_attribute("custom.generation.ground_truth", request.expected_response)
 
-                # Latency measurements from llama.cpp
+                # Latency measurements from llama-server
                 ttft_ms = gen_result.prompt_ms + gen_result.predicted_per_token_ms
                 generation_span.set_attribute("custom.latency.ttft_ms", ttft_ms)
                 generation_span.set_attribute("custom.latency.llm_generation_latency_ms", gen_result.predicted_ms)

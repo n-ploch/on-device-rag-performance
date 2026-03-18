@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, Union
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from worker.models.generator import Generator as InProcessGenerator
     from worker.models.generator_http import LlamaServerGenerator
+    from worker.models.generator_remote import RemoteGenerator
 
 
 @dataclass
@@ -34,7 +34,7 @@ class GeneratorProtocol(Protocol):
 
 
 # Type alias for generator implementations
-GeneratorType = Union["InProcessGenerator", "LlamaServerGenerator"]
+GeneratorType = "LlamaServerGenerator | RemoteGenerator"
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +42,7 @@ logger = logging.getLogger(__name__)
 class GenerationService:
     """Runs RAG-style answer generation using the configured LLM.
 
-    Supports both in-process generators (llama-cpp-python) and HTTP-based
-    generators (llama-server) through duck typing.
+    Supports local (llama-server) and remote generator backends through duck typing.
     """
 
     def __init__(self, generator: GeneratorType):

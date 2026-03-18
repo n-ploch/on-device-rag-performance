@@ -18,7 +18,7 @@ class GenerationResult:
     text: str
     prompt_tokens: int
     completion_tokens: int
-    # Server-side timing (from llama.cpp timings)
+    # Server-side timing (from llama-server timings)
     prompt_ms: float = 0.0
     predicted_ms: float = 0.0
     predicted_per_token_ms: float = 0.0
