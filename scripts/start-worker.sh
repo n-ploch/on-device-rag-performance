@@ -2,20 +2,6 @@
 # start-worker.sh — start the RAGrig worker on the edge device (bare-metal)
 set -euo pipefail
 
-# ── Parse arguments ────────────────────────────────────────────────────────────
-LOG_LEVEL="info"
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --log-level|-l) LOG_LEVEL="$2"; shift 2 ;;
-    *) echo "Unknown argument: $1" >&2; exit 1 ;;
-  esac
-done
-case "$LOG_LEVEL" in
-  debug|info|warning|error|critical) ;;
-  *) echo "ERROR: --log-level must be one of: debug info warning error critical" >&2; exit 1 ;;
-esac
-export LOG_LEVEL
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="$ROOT/.rag"
 
@@ -34,6 +20,20 @@ if [[ -f "$ROOT/.env" ]]; then
   source "$ROOT/.env"
   set +a
 fi
+
+# ── Parse arguments (overrides .env) ──────────────────────────────────────────
+LOG_LEVEL="info"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --log-level|-l) LOG_LEVEL="$2"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+case "$LOG_LEVEL" in
+  debug|info|warning|error|critical) ;;
+  *) echo "ERROR: --log-level must be one of: debug info warning error critical" >&2; exit 1 ;;
+esac
+export LOG_LEVEL
 
 # ── Required environment variable checks ─────────────────────────────────────
 MISSING=()
@@ -68,6 +68,7 @@ echo "    Models:      $LOCAL_MODELS_DIR"
 echo "    Collections: $LOCAL_COLLECTIONS_DIR"
 echo "    Datasets:    $LOCAL_DATASETS_DIR"
 echo "    Listening:   http://$HOST:$PORT"
+echo "    Log level:   $LOG_LEVEL"
 echo ""
 
 cd "$ROOT"
