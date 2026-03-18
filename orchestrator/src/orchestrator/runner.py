@@ -502,10 +502,11 @@ def main() -> int:
         help="Suppress progress output",
     )
     parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
-        help="Enable verbose logging",
+        "--log-level",
+        "-l",
+        default="info",
+        choices=["debug", "info", "warning", "error", "critical"],
+        help="Logging level (default: info)",
     )
     parser.add_argument(
         "--run-id",
@@ -517,7 +518,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Configure initial logging (will be reconfigured after loading config)
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+    log_level = getattr(logging, args.log_level.upper())
     configure_logging(level=log_level, print_logs=True, sys_logs_path=None)
 
     # Validate config path

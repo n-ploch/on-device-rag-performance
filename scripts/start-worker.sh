@@ -2,6 +2,20 @@
 # start-worker.sh — start the RAGrig worker on the edge device (bare-metal)
 set -euo pipefail
 
+# ── Parse arguments ────────────────────────────────────────────────────────────
+LOG_LEVEL="info"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --log-level|-l) LOG_LEVEL="$2"; shift 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+case "$LOG_LEVEL" in
+  debug|info|warning|error|critical) ;;
+  *) echo "ERROR: --log-level must be one of: debug info warning error critical" >&2; exit 1 ;;
+esac
+export LOG_LEVEL
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VENV="$ROOT/.rag"
 
@@ -61,4 +75,4 @@ exec uvicorn worker.main:create_app \
   --factory \
   --host "$HOST" \
   --port "$PORT" \
-  --log-level "${LOG_LEVEL:-info}"
+  --log-level "$LOG_LEVEL"
