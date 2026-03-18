@@ -9,8 +9,6 @@ apply: on-demand
 triggers:
   - "set up ragrig"
   - "bootstrap worker"
-  - "load models"
-  - "build collection"
   - "start worker"
   - "initialize ragrig"
   - "prepare for evaluation"
