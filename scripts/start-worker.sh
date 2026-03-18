@@ -72,8 +72,4 @@ echo "    Log level:   $LOG_LEVEL"
 echo ""
 
 cd "$ROOT"
-exec uvicorn worker.main:create_app \
-  --factory \
-  --host "$HOST" \
-  --port "$PORT" \
-  --log-level "$LOG_LEVEL"
+exec rag-worker --host "$HOST" --port "$PORT" --log-level "$LOG_LEVEL"
