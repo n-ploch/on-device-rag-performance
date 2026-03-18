@@ -23,22 +23,6 @@ prerequisites:
   - ".env exists with LOCAL_MODELS_DIR, LOCAL_COLLECTIONS_DIR, LOCAL_DATASETS_DIR set"
 tools_required: [bash, read_file, http]
 compatible_with: [claude-code, cursor, copilot, codex]
----
-
-## Config file first — mandatory
-
-**Setup reads model and dataset IDs from a config file.** Before starting,
-ensure a config file exists for this experiment.
-
-1. If a `--config` argument was passed and the file exists → proceed to
-   [Step 1](#step-1--verify-environment).
-2. If no config file is found → stop and create one first:
-   - Tell the user: *"No config file found. Let me guide you through creating
-     one before we set up the worker."*
-   - Follow **`skills/ragrig-config.md`** (or invoke `/ragrig-config`).
-3. Do **not** use `config/sample_config.yaml` for real experiments — it is a
-   reference file only. All options are documented in
-   [`docs/config.md`](../docs/config.md).
 
 ---
 
