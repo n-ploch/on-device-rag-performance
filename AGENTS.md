@@ -161,7 +161,7 @@ Exit 0 = success. Non-zero = error (check stderr).
 | `POST` | `/generate` | Run RAG inference |
 | `GET` | `/metrics` | llama-server telemetry |
 
-Full schema in `shared/src/shared_types/schemas.py`. Human-readable docs in `docs/`.
+Full schemas in `shared/src/shared_types/schemas.py`. Human-readable docs in `docs/`.
 
 ---
 
@@ -171,7 +171,7 @@ See `config/sample_config.yaml` for a full working example.
 
 ```yaml
 dataset:
-  name: ragbench          # or: scifact
+  name: ragbench          
 
 observability:
   backends:

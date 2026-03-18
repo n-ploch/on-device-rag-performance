@@ -27,8 +27,6 @@ arguments:
     default: "false"
 prerequisites:
   - "Worker running and healthy (GET /health returns 200)"
-  - "Models loaded in worker (POST /load_models completed)"
-  - "ChromaDB collection populated (POST /collection/status returns populated: true)"
   - ".env configured with observability backend credentials if enabled"
 tools_required: [bash, http]
 compatible_with: [claude-code, cursor, copilot, codex]
@@ -43,7 +41,7 @@ for this experiment.**
    [Pre-flight checklist](#pre-flight-checklist).
 2. If no argument was passed, check whether `config/config.yaml` or
    `config/my_experiment.yaml` exists. If a plausible config file is present,
-   confirm with the user before using it.
+   confirm with the user before using it or whether another config should be used. Offer to create a new one with `skills/ragrig-config.md`.
 3. If **no config file exists** → stop and run the config creation flow:
    - Tell the user: *"No config file found. Creating a config file is the
      required first step. Let me guide you through it."*
@@ -117,26 +115,6 @@ rag-orchestrator --config config/my_experiment.yaml -q
 
 Exit code 0 = success. Non-zero = error (check stderr).
 
-### Via HTTP API (programmatic / streaming)
-
-```bash
-# 1. Load config
-curl -s -X POST http://localhost:8080/api/config/load \
-  -H "Content-Type: application/json" \
-  -d '{"path": "config/my_experiment.yaml"}'
-
-# 2. Stream evaluation (SSE — keep connection open)
-curl -s -N -X POST http://localhost:8080/api/run \
-  -H "Content-Type: application/json" -d '{}'
-
-# 3. Stop early if needed
-curl -s -X POST http://localhost:8080/api/stop
-```
-
-SSE events: `run_start` → `entry_result` (one per entry) → `run_complete` → `done`.
-
----
-
 ## Interpreting results
 
 ### Output files
@@ -154,6 +132,5 @@ SSE events: `run_start` → `entry_result` (one per entry) → `run_complete` �
 | `recall_at_k` | > 0.7 | Fraction of relevant docs retrieved in top-k |
 | `precision_at_k` | > 0.5 | Fraction of retrieved docs that are relevant |
 | `mrr` | > 0.6 | Mean reciprocal rank of first relevant doc |
-| `abstention` | low | Model declined to answer (signals retrieval failure) |
 | `ttft_ms` | < 500 ms | Time to first token |
 | `tokens_per_second` | device-dependent | Generation throughput |
