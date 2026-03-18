@@ -16,7 +16,7 @@ from shared_types.schemas import (
     InferenceMeasurement,
     RetrievalData,
 )
-from worker.models.generator import GenerationResult
+from worker.models.generator_http import GenerationResult
 
 
 @pytest.fixture
