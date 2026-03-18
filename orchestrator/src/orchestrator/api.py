@@ -189,7 +189,28 @@ async def _run_configs_loop_with_progress(
     total_configs = len(run_configs)
 
     for config_idx, run_config in enumerate(run_configs):
+        # Stop check before model loading (catches stop between configs)
+        if stop_event.is_set():
+            await _emit(queue, {"type": "stopped", "run_id": run_config.run_id,
+                                "completed_entries": 0, "total_entries": 0, **_summary_metrics([])})
+            return
+
+        await _emit(
+            queue,
+            {
+                "type": "loading_models",
+                "run_id": run_config.run_id,
+                "config_index": config_idx + 1,
+                "total_configs": total_configs,
+            },
+        )
         await orchestrator.prepare_run_config(run_config)
+
+        # Stop check after model loading (catches stop clicked during loading)
+        if stop_event.is_set():
+            await _emit(queue, {"type": "stopped", "run_id": run_config.run_id,
+                                "completed_entries": 0, "total_entries": 0, **_summary_metrics([])})
+            return
 
         repeat_count = run_config.repeat if run_config.repeat is not None else 1
 
@@ -348,6 +369,15 @@ async def _run_with_progress(
                 )
                 return
 
+            await _emit(
+                queue,
+                {
+                    "type": "loading_models",
+                    "run_id": run_configs[0].run_id,
+                    "config_index": 1,
+                    "total_configs": len(run_configs),
+                },
+            )
             await orchestrator.validate_global_prerequisites()
             validation = orchestrator.validate_dataset()
             entries = load_ground_truth(validation.ground_truth_path)

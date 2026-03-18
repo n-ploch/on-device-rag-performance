@@ -10,6 +10,7 @@ It handles:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass
@@ -437,16 +438,18 @@ class Orchestrator:
 
         return statuses
 
-    def _ensure_models(self) -> None:
+    async def _ensure_models(self) -> None:
         """Ensure all required models are available locally.
 
-        Downloads missing models from HuggingFace Hub.
+        Downloads missing models from HuggingFace Hub. Runs in a thread
+        executor so the event loop remains free to flush SSE events during
+        potentially long downloads.
 
         Raises:
             ModelPreparationError: If model preparation fails.
         """
         try:
-            statuses = ensure_models(self.config, self.models_dir)
+            statuses = await asyncio.to_thread(ensure_models, self.config, self.models_dir)
             for status in statuses:
                 if status.downloaded:
                     logger.info(
@@ -476,7 +479,7 @@ class Orchestrator:
             httpx.HTTPError: If worker communication fails.
         """
         logger.info("Validating global prerequisites...")
-        self._ensure_models()
+        await self._ensure_models()
         self.validate_dataset()
         await self.check_worker_health(require_models=False)
         logger.info("Global prerequisites validated")
