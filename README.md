@@ -102,20 +102,28 @@ llama-server --version
 
 You should see a version string and the active backend listed (e.g., `ggml_metal`, `ggml_cuda`). If `llama-server` is not found, check your `PATH`.
 
----
-
-## Agentic usage
-
-This benchmarking tool can also be used by agents! Review the `AGENTS.md` for further information and the `skills` folder for a deep understanding of the functionalities.
-
-A Claude Code (github, cursor as well) skill is available at `.claude/commands/ragrig.md`. Invoke it in
-Claude Code with `/ragrig` to start working with RAGrig!
 
 ---
 
 ## Quick start
 
+### 0. Download
+
+Either download the latest release from the release tags overview or run the following command to checkout the latest release:
+
+```bash
+git clone --branch release git@github.com:n-ploch/RAGrig.git
+```
+
+If you want to include the analysis notebooks and published study as well, checkout main:
+
+```bash
+git clone git@github.com:n-ploch/RAGrig.git
+```
+
 ### 1. Bootstrap
+
+Navigate inside the project folder and execute the following script:
 
 ```bash
 ./scripts/setup.sh
@@ -169,6 +177,15 @@ docker compose up --build -d           # background (detached)
 ```
 
 Orchestrator API on `localhost:8080`, frontend on `localhost:3003`. The worker always runs bare-metal on the edge device for optimal performance and native GPU support.
+
+---
+
+## Agentic usage
+
+This benchmarking tool can also be used by agents! Review the `AGENTS.md` for further information and the `skills` folder for a deep understanding of the functionalities.
+
+A Claude Code (github, cursor as well) skill is available at `.claude/commands/ragrig.md`. Invoke it in
+Claude Code with `/ragrig` to start working with RAGrig!
 
 ---
 
